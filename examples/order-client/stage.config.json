@@ -1,0 +1,67 @@
+{
+  "$comment": "선택적 스테이지 힌트. 개발 단계에서 작성한다. 패키지 files에 포함되지 않으므로 컨슈머 배포물에 들어가지 않는다.",
+  "consumer": {
+    "setup": {
+      "export": "createOrderClient",
+      "args": [
+        {
+          "baseUrl": { "$env": "ORDER_API_URL" },
+          "token": { "$env": "ORDER_API_TOKEN", "secret": true },
+          "timeoutMs": 3000
+        }
+      ]
+    }
+  },
+  "operations": {
+    "placeOrder": {
+      "mutation": true,
+      "idempotency": { "argIndex": 1, "field": "idempotencyKey" },
+      "followUp": {
+        "method": "getOrder",
+        "args": [{ "$result": "orderId" }],
+        "expect": [
+          { "path": "orderId", "equalsResult": "orderId" },
+          { "path": "sku", "equalsInput": [0, "sku"] },
+          { "path": "quantity", "equalsInput": [0, "quantity"] }
+        ]
+      }
+    },
+    "getOrder": { "mutation": false }
+  },
+  "mock": {
+    "routes": [
+      { "method": "POST", "path": "/orders", "status": 201, "body": { "id": "mock-ord-1", "sku": "SKU-1", "quantity": 2, "status": "created" } },
+      { "method": "GET", "pathPrefix": "/orders/", "status": 200, "body": { "id": "mock-ord-1", "sku": "SKU-1", "quantity": 2, "status": "created" } }
+    ],
+    "variants": [
+      {
+        "name": "정상 응답",
+        "operation": "placeOrder",
+        "args": [{ "sku": "SKU-1", "quantity": 2 }],
+        "expect": { "resolves": true }
+      },
+      {
+        "name": "서버 오류 503",
+        "operation": "placeOrder",
+        "args": [{ "sku": "SKU-1", "quantity": 2 }],
+        "routes": [{ "method": "POST", "path": "/orders", "status": 503, "body": { "message": "unavailable" } }],
+        "expect": { "rejects": { "name": "HttpError", "props": { "status": 503 } } }
+      },
+      {
+        "name": "지연 응답 400ms",
+        "operation": "placeOrder",
+        "args": [{ "sku": "SKU-1", "quantity": 2 }],
+        "routes": [{ "method": "POST", "path": "/orders", "status": 201, "delayMs": 400, "body": { "id": "mock-ord-2", "sku": "SKU-1", "quantity": 2, "status": "created" } }],
+        "expect": { "resolves": true, "minDurationMs": 400 }
+      },
+      {
+        "name": "클라이언트 시간 초과",
+        "operation": "placeOrder",
+        "args": [{ "sku": "SKU-1", "quantity": 2 }],
+        "setupOverrides": { "timeoutMs": 150 },
+        "routes": [{ "method": "POST", "path": "/orders", "status": 201, "delayMs": 1000, "body": { "id": "mock-ord-3", "sku": "SKU-1", "quantity": 2, "status": "created" } }],
+        "expect": { "rejects": { "name": "TimeoutError" } }
+      }
+    ]
+  }
+}

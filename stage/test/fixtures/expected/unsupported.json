@@ -1,0 +1,247 @@
+{
+  "status": "unsupported",
+  "rulesVersion": "london-node-test/1.0.0",
+  "imports": [
+    {
+      "specifier": "node:test",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "it",
+        "before",
+        "mock"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+        "line": 1,
+        "column": 1
+      },
+      "evidence": "node:test: 인식기 있는 테스트 도구"
+    },
+    {
+      "specifier": "node:assert/strict",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "default"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+        "line": 2,
+        "column": 1
+      },
+      "evidence": "node:assert/strict: 인식기 있는 테스트 도구"
+    },
+    {
+      "specifier": "../../../../examples/order-client/src/internal/order-service.ts",
+      "kind": "static",
+      "role": "target-source",
+      "resolvedFile": "src/internal/order-service.ts",
+      "names": [
+        "OrderService"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+        "line": 3,
+        "column": 1
+      },
+      "evidence": "공개 entry에서 도달 가능한 소스: src/internal/order-service.ts"
+    }
+  ],
+  "findings": [
+    {
+      "ruleId": "hook/once",
+      "level": "unsupported",
+      "message": "before 훅(테스트 간 공유 준비/정리)은 시나리오별 격리 실행 모델로 옮기지 않음",
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+        "line": 5,
+        "column": 1
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "sc1",
+      "title": "places several orders in a loop",
+      "path": [
+        "places several orders in a loop"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+        "line": 7,
+        "column": 1
+      },
+      "runKind": "stateful-object",
+      "targets": [
+        {
+          "id": "t1",
+          "kind": "class",
+          "sourceFile": "src/internal/order-service.ts",
+          "sourceExport": "OrderService",
+          "importedAs": "OrderService",
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+            "line": 3,
+            "column": 10
+          },
+          "publicApi": {
+            "status": "mapped",
+            "specifier": "@sample/order-client",
+            "exportName": "OrderService",
+            "evidence": "checker: src/internal/order-service.ts의 OrderService ≡ @sample/order-client의 export 'OrderService' (같은 선언 심볼)"
+          }
+        }
+      ],
+      "doubles": [
+        {
+          "id": "http",
+          "varName": "http",
+          "shape": "object",
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+            "line": 8,
+            "column": 16
+          },
+          "methods": {
+            "post": {
+              "behavior": {
+                "kind": "resolves",
+                "value": {
+                  "id": "o",
+                  "status": "created"
+                }
+              },
+              "loc": {
+                "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+                "line": 8,
+                "column": 18
+              }
+            },
+            "get": {
+              "behavior": {
+                "kind": "noop"
+              },
+              "loc": {
+                "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+                "line": 8,
+                "column": 79
+              }
+            }
+          },
+          "collaboratorOf": {
+            "step": "s1",
+            "param": "http",
+            "type": "HttpClient"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "kind": "construct",
+          "target": "t1",
+          "instance": "i1",
+          "args": [
+            {
+              "kind": "double",
+              "id": "http"
+            }
+          ],
+          "params": [
+            {
+              "name": "http",
+              "optional": false,
+              "type": "HttpClient",
+              "schema": {
+                "kind": "object",
+                "name": "HttpClient",
+                "props": {
+                  "post": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string, body: unknown, options?: RequestOptions | undefined) => Promise<T>"
+                    },
+                    "optional": false
+                  },
+                  "get": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string) => Promise<T>"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            }
+          ],
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+            "line": 9,
+            "column": 19
+          },
+          "source": "new OrderService(http)"
+        },
+        {
+          "id": "s2",
+          "kind": "check",
+          "check": {
+            "id": "c1",
+            "kind": "unsupported",
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+              "line": 13,
+              "column": 3
+            },
+            "source": "assert.match(String(http.post.mock.callCount()), /3/)",
+            "reason": "assert.match은(는) 인식 규칙이 없음"
+          }
+        }
+      ],
+      "teardown": [],
+      "support": {
+        "status": "unsupported",
+        "findings": [
+          {
+            "ruleId": "hook/once",
+            "level": "unsupported",
+            "message": "before 훅(테스트 간 공유 준비/정리)은 시나리오별 격리 실행 모델로 옮기지 않음",
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+              "line": 5,
+              "column": 1
+            }
+          },
+          {
+            "ruleId": "stmt/kind",
+            "level": "unsupported",
+            "message": "test 본문의 ForOfStatement 구문은 실행 모델로 옮기지 않음(분기·반복·예외 처리 등)",
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+              "line": 10,
+              "column": 3
+            },
+            "evidence": "for (const quantity of [1, 2, 3]) { await service.placeOrder({ sku: 'A', quantity }); }"
+          },
+          {
+            "ruleId": "assert/unsupported",
+            "level": "unsupported",
+            "message": "assert.match은(는) 인식 규칙이 없음",
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/unsupported.case.ts",
+              "line": 13,
+              "column": 3
+            },
+            "evidence": "assert.match(String(http.post.mock.callCount()), /3/)"
+          }
+        ]
+      },
+      "consumerLink": {
+        "status": "linked",
+        "setupExport": "createOrderClient",
+        "operations": [],
+        "evidence": "checker: createOrderClient(...)의 반환 타입이 OrderService → 같은 공개 메서드()를 컨슈머 초기화 경로로 호출 가능"
+      }
+    }
+  ]
+}

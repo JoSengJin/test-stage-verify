@@ -1,0 +1,267 @@
+{
+  "status": "contract-mismatch",
+  "rulesVersion": "london-node-test/1.0.0",
+  "imports": [
+    {
+      "specifier": "node:test",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "it",
+        "mock"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+        "line": 1,
+        "column": 1
+      },
+      "evidence": "node:test: 인식기 있는 테스트 도구"
+    },
+    {
+      "specifier": "node:assert/strict",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "default"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+        "line": 2,
+        "column": 1
+      },
+      "evidence": "node:assert/strict: 인식기 있는 테스트 도구"
+    },
+    {
+      "specifier": "../../../../examples/order-client/src/internal/order-service.ts",
+      "kind": "static",
+      "role": "target-source",
+      "resolvedFile": "src/internal/order-service.ts",
+      "names": [
+        "OrderService"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+        "line": 3,
+        "column": 1
+      },
+      "evidence": "공개 entry에서 도달 가능한 소스: src/internal/order-service.ts"
+    }
+  ],
+  "findings": [],
+  "scenarios": [
+    {
+      "id": "sc1",
+      "title": "cancels an order",
+      "path": [
+        "cancels an order"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+        "line": 5,
+        "column": 1
+      },
+      "runKind": "stateful-object",
+      "targets": [
+        {
+          "id": "t1",
+          "kind": "class",
+          "sourceFile": "src/internal/order-service.ts",
+          "sourceExport": "OrderService",
+          "importedAs": "OrderService",
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+            "line": 3,
+            "column": 10
+          },
+          "publicApi": {
+            "status": "mapped",
+            "specifier": "@sample/order-client",
+            "exportName": "OrderService",
+            "evidence": "checker: src/internal/order-service.ts의 OrderService ≡ @sample/order-client의 export 'OrderService' (같은 선언 심볼)"
+          }
+        }
+      ],
+      "doubles": [
+        {
+          "id": "http",
+          "varName": "http",
+          "shape": "object",
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+            "line": 6,
+            "column": 16
+          },
+          "methods": {
+            "send": {
+              "behavior": {
+                "kind": "resolves",
+                "value": {
+                  "ok": true
+                }
+              },
+              "loc": {
+                "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+                "line": 6,
+                "column": 18
+              }
+            },
+            "post": {
+              "behavior": {
+                "kind": "noop"
+              },
+              "loc": {
+                "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+                "line": 6,
+                "column": 61
+              }
+            },
+            "get": {
+              "behavior": {
+                "kind": "noop"
+              },
+              "loc": {
+                "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+                "line": 6,
+                "column": 78
+              }
+            }
+          },
+          "collaboratorOf": {
+            "step": "s1",
+            "param": "http",
+            "type": "HttpClient"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "kind": "construct",
+          "target": "t1",
+          "instance": "i1",
+          "args": [
+            {
+              "kind": "double",
+              "id": "http"
+            }
+          ],
+          "params": [
+            {
+              "name": "http",
+              "optional": false,
+              "type": "HttpClient",
+              "schema": {
+                "kind": "object",
+                "name": "HttpClient",
+                "props": {
+                  "post": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string, body: unknown, options?: RequestOptions | undefined) => Promise<T>"
+                    },
+                    "optional": false
+                  },
+                  "get": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string) => Promise<T>"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            }
+          ],
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+            "line": 7,
+            "column": 19
+          },
+          "source": "new OrderService(http)"
+        },
+        {
+          "id": "s2",
+          "kind": "call",
+          "instance": "i1",
+          "method": "cancelOrder",
+          "args": [
+            {
+              "kind": "value",
+              "value": "ord-1"
+            }
+          ],
+          "params": [],
+          "returns": {
+            "kind": "unknown"
+          },
+          "returnsText": "?",
+          "awaited": false,
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+            "line": 9,
+            "column": 9
+          },
+          "source": "service.cancelOrder('ord-1')"
+        },
+        {
+          "id": "s3",
+          "kind": "check",
+          "check": {
+            "id": "c1",
+            "kind": "compare",
+            "module": "node:assert/strict",
+            "op": "equal",
+            "subject": {
+              "kind": "callCount",
+              "double": "http",
+              "method": "send"
+            },
+            "expected": 1,
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+              "line": 10,
+              "column": 3
+            },
+            "source": "assert.equal(http.send.mock.callCount(), 1)"
+          }
+        }
+      ],
+      "teardown": [],
+      "support": {
+        "status": "contract-mismatch",
+        "findings": [
+          {
+            "ruleId": "contract/double-extra",
+            "level": "mismatch",
+            "message": "대체 객체 'http'의 'send'은(는) 협력 계약 HttpClient에 없음",
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+              "line": 7,
+              "column": 19
+            },
+            "evidence": "new OrderService(http)"
+          },
+          {
+            "ruleId": "contract/method-missing",
+            "level": "mismatch",
+            "message": "테스트가 호출한 'cancelOrder'이(가) 대상 OrderService의 공개 계약에 없음",
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/contract-mismatch.case.ts",
+              "line": 9,
+              "column": 9
+            },
+            "evidence": "service.cancelOrder('ord-1')"
+          }
+        ]
+      },
+      "consumerLink": {
+        "status": "linked",
+        "setupExport": "createOrderClient",
+        "operations": [
+          "cancelOrder"
+        ],
+        "evidence": "checker: createOrderClient(...)의 반환 타입이 OrderService → 같은 공개 메서드(cancelOrder)를 컨슈머 초기화 경로로 호출 가능"
+      }
+    }
+  ]
+}

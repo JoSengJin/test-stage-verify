@@ -1,0 +1,5 @@
+{
+  "name": "stage-framework-internal",
+  "private": true,
+  "type": "module"
+}

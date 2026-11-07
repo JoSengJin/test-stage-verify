@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>스테이지 검증</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">스테이지 검증 <span class="muted" id="meta"></span></div>
+    <div class="row gap">
+      <button class="btn hidden" id="restart" type="button" title="서버 프로세스를 다시 시작합니다. 진행 중인 작업은 중단됩니다.">서버 재시작</button>
+      <div class="conn" id="conn"><i class="dot"></i><span>서버 연결 확인 중…</span></div>
+    </div>
+  </header>
+
+  <!-- 첫 진입: 드롭 하나만 -->
+  <main id="home" class="home">
+    <div class="home-inner">
+      <h1>테스트 파일을 끌어다 놓으세요</h1>
+      <p class="lead">런던파 테스트 파일을 여러 개 놓으면, 놓은 순서대로 분석하고 실행 큐에 쌓습니다.</p>
+
+      <div id="drop" class="stage-drop" tabindex="0" role="button" aria-label="테스트 파일 선택">
+        <div class="light" aria-hidden="true"></div>
+        <div class="drop-copy">
+          <strong>여기에 파일 놓기</strong>
+          <span>.ts · .js · .mjs · .tsx 파일, 여러 개 가능</span>
+        </div>
+        <label class="btn primary pick">파일 선택<input type="file" id="file" accept=".ts,.mts,.js,.mjs,.tsx,.jsx" multiple hidden></label>
+      </div>
+
+      <div class="projects">
+        <span class="muted small">연결할 프로젝트</span>
+        <span id="projects" class="chips"></span>
+        <button class="link" id="add-project" type="button">프로젝트 추가</button>
+      </div>
+      <form id="add-project-help" class="help hidden small">
+        <p>테스트 대상 패키지의 절대 경로(package.json이 있는 폴더)를 입력하세요. 등록은 저장되어 서버를 다시 시작해도 유지됩니다.</p>
+        <div class="copyline"><input id="project-path" type="text" placeholder="/Users/me/work/my-package" autocomplete="off" spellcheck="false" style="flex:1"><button class="btn primary" type="submit">등록</button></div>
+        <p id="project-err" class="small" style="color:var(--bad,#c33)"></p>
+      </form>
+
+      <section class="recent hidden" id="recent">
+        <h2>최근 실행</h2>
+        <div id="history-home"></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- 작업 화면: 왼쪽 큐 + 오른쪽 단계별 화면 -->
+  <div id="work" class="work hidden">
+    <aside class="rail">
+      <div id="mini-drop" class="mini-drop" tabindex="0" role="button">
+        <span>파일 더 놓기</span>
+        <label class="btn pick">선택<input type="file" id="file2" accept=".ts,.mts,.js,.mjs,.tsx,.jsx" multiple hidden></label>
+      </div>
+      <div class="rail-head">
+        <h2>실행 순서 <span class="count" id="q-count"></span></h2>
+        <button class="btn primary" id="run-all" type="button">전체 실행</button>
+      </div>
+      <ol id="queue" class="queue"></ol>
+      <details class="past"><summary>최근 실행</summary><div id="history-rail"></div></details>
+    </aside>
+
+    <section class="detail" id="detail">
+      <header class="d-head">
+        <div class="d-title">
+          <h1 id="d-title"></h1>
+          <div id="d-sub" class="small muted"></div>
+        </div>
+        <div class="row gap">
+          <button class="btn danger" id="cancel" type="button">실행 취소</button>
+          <button class="btn" id="rerun" type="button">재실행(새 기록)</button>
+        </div>
+      </header>
+
+      <nav id="stepper" class="stepper" aria-label="검증 단계"></nav>
+
+      <div class="screens">
+        <section class="screen" id="screen-analysis" aria-labelledby="h-analysis">
+          <h2 id="h-analysis">분석 결과 <span id="an-status"></span></h2>
+          <div id="analysis"></div>
+        </section>
+
+        <section class="screen" id="screen-s1" aria-labelledby="h-s1">
+          <h2 id="h-s1">1단계 · 원본 테스트 실행</h2>
+          <div class="lede small muted">프로젝트의 테스트를 그대로 실행해 통과하는지 먼저 확인합니다.</div>
+          <div id="s1-head"></div>
+          <div id="s1-jobs"></div>
+        </section>
+
+        <section class="screen" id="screen-s2" aria-labelledby="h-s2">
+          <h2 id="h-s2">2단계 · 배포 후보 검증</h2>
+          <div class="lede small muted">패키지를 실제 tarball로 만들어 격리된 컨슈머에 설치하고, 공개 API 기준으로 시나리오를 다시 실행합니다.</div>
+          <div id="s2-head"></div>
+          <div id="candidate"></div>
+          <div id="s2-jobs"></div>
+        </section>
+
+        <section class="screen" id="screen-s3" aria-labelledby="h-s3">
+          <h2 id="h-s3">3단계 · 사용자 조작·Stage 연계</h2>
+          <div id="s3-locked" class="empty hidden"></div>
+          <div id="s3-body">
+            <div id="env" class="env"></div>
+            <div id="wiring"></div>
+            <div id="playground"></div>
+            <div id="script-panel"></div>
+            <div id="ops"></div>
+            <div id="s3-jobs"></div>
+            <div class="row gap confirm">
+              <button class="btn primary" id="complete3" type="button">3단계 판정 확정</button>
+              <span class="muted small" id="complete3-hint">Stage 모드 조작의 시나리오별 최신 결과로만 판정합니다. Mock 조작은 별도로 보고합니다.</span>
+            </div>
+            <h3>수동 확인 <span class="muted small">자동 판정과 별도로 기록됩니다</span></h3>
+            <form id="manual" class="row gap wrap">
+              <input name="target" placeholder="대상(시나리오·화면 등)" required>
+              <select name="verdict"><option value="confirmed">확인함</option><option value="issue">문제 발견</option><option value="note">메모</option></select>
+              <input name="note" placeholder="내용" required class="grow">
+              <button class="btn">기록</button>
+            </form>
+            <ul id="manual-list" class="small"></ul>
+          </div>
+        </section>
+
+        <section class="screen" id="screen-report" aria-labelledby="h-report">
+          <h2 id="h-report">통합 보고서 <a id="report-html" class="small" target="_blank">HTML로 열기</a></h2>
+          <div id="report"></div>
+        </section>
+      </div>
+    </section>
+  </div>
+
+  <div id="veil" class="veil" aria-hidden="true"><div>놓으면 큐에 추가됩니다</div></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

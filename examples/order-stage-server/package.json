@@ -1,0 +1,6 @@
+{
+  "name": "@sample/order-stage-server",
+  "private": true,
+  "type": "module",
+  "description": "Local stand-in for the order Stage backend. Not a real deployed Stage environment."
+}

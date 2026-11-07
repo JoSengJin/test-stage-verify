@@ -1,0 +1,96 @@
+{
+  "status": "no-target",
+  "rulesVersion": "london-node-test/1.0.0",
+  "imports": [
+    {
+      "specifier": "node:test",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "it"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/no-target.case.ts",
+        "line": 1,
+        "column": 1
+      },
+      "evidence": "node:test: 인식기 있는 테스트 도구"
+    },
+    {
+      "specifier": "node:assert/strict",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "default"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/no-target.case.ts",
+        "line": 2,
+        "column": 1
+      },
+      "evidence": "node:assert/strict: 인식기 있는 테스트 도구"
+    }
+  ],
+  "findings": [],
+  "scenarios": [
+    {
+      "id": "sc1",
+      "title": "only exercises a local helper",
+      "path": [
+        "only exercises a local helper"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/no-target.case.ts",
+        "line": 6,
+        "column": 1
+      },
+      "runKind": "none",
+      "targets": [],
+      "doubles": [],
+      "steps": [
+        {
+          "id": "s1",
+          "kind": "check",
+          "check": {
+            "id": "c1",
+            "kind": "unsupported",
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/no-target.case.ts",
+              "line": 7,
+              "column": 3
+            },
+            "source": "assert.equal(add(1, 2), 3)",
+            "reason": "검증 대상 값(add(1, 2))을 관찰 항목으로 해석하지 못함: 호출 대상(add)이 검증 대상 공개 API·인스턴스가 아님(보조 함수 결과는 정적으로 알 수 없음)"
+          }
+        }
+      ],
+      "teardown": [],
+      "support": {
+        "status": "no-target",
+        "findings": [
+          {
+            "ruleId": "assert/unsupported",
+            "level": "unsupported",
+            "message": "검증 대상 값(add(1, 2))을 관찰 항목으로 해석하지 못함: 호출 대상(add)이 검증 대상 공개 API·인스턴스가 아님(보조 함수 결과는 정적으로 알 수 없음)",
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/no-target.case.ts",
+              "line": 7,
+              "column": 3
+            },
+            "evidence": "assert.equal(add(1, 2), 3)"
+          },
+          {
+            "ruleId": "target/none",
+            "level": "no-target",
+            "message": "검증 대상 공개 API 호출이 없음(테스트가 대상 소스의 함수·클래스를 실행하지 않음)",
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/no-target.case.ts",
+              "line": 6,
+              "column": 1
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

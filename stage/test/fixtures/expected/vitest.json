@@ -1,0 +1,66 @@
+{
+  "status": "unsupported",
+  "rulesVersion": "london-node-test/1.0.0",
+  "imports": [
+    {
+      "specifier": "vitest",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "it",
+        "expect",
+        "vi"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/vitest.case.ts",
+        "line": 1,
+        "column": 1
+      },
+      "evidence": "vitest: 알려진 테스트 도구(현재 인식기 없음)"
+    },
+    {
+      "specifier": "../../../../examples/order-client/src/internal/order-service.ts",
+      "kind": "static",
+      "role": "target-source",
+      "resolvedFile": "src/internal/order-service.ts",
+      "names": [
+        "OrderService"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/vitest.case.ts",
+        "line": 2,
+        "column": 1
+      },
+      "evidence": "공개 entry에서 도달 가능한 소스: src/internal/order-service.ts"
+    }
+  ],
+  "findings": [
+    {
+      "ruleId": "tool/unknown",
+      "level": "unsupported",
+      "message": "vitest 인식기가 없음(현재 node:test·node:assert만 지원)",
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/vitest.case.ts",
+        "line": 1,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "suite/statement",
+      "level": "unsupported",
+      "message": "테스트 구조에서 해석하지 않은 구문(ExpressionStatement)",
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/vitest.case.ts",
+        "line": 4,
+        "column": 1
+      },
+      "evidence": "it('vitest style', async () => { const http = { post: vi.fn(), get: vi.fn() }; const service = new OrderService(http as any); expect(service).toBeTruthy(); });"
+    },
+    {
+      "ruleId": "test/none",
+      "level": "no-target",
+      "message": "인식한 테스트 케이스가 없음(node:test의 test/it 호출 없음)"
+    }
+  ],
+  "scenarios": []
+}

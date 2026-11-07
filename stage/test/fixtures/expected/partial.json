@@ -1,0 +1,318 @@
+{
+  "status": "partial",
+  "rulesVersion": "london-node-test/1.0.0",
+  "imports": [
+    {
+      "specifier": "node:test",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "it",
+        "mock"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/partial.case.ts",
+        "line": 1,
+        "column": 1
+      },
+      "evidence": "node:test: 인식기 있는 테스트 도구"
+    },
+    {
+      "specifier": "node:assert/strict",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "default"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/partial.case.ts",
+        "line": 2,
+        "column": 1
+      },
+      "evidence": "node:assert/strict: 인식기 있는 테스트 도구"
+    },
+    {
+      "specifier": "../../../../examples/order-client/src/internal/order-service.ts",
+      "kind": "static",
+      "role": "target-source",
+      "resolvedFile": "src/internal/order-service.ts",
+      "names": [
+        "OrderService"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/partial.case.ts",
+        "line": 3,
+        "column": 1
+      },
+      "evidence": "공개 entry에서 도달 가능한 소스: src/internal/order-service.ts"
+    }
+  ],
+  "findings": [],
+  "scenarios": [
+    {
+      "id": "sc1",
+      "title": "uses a computed fixture",
+      "path": [
+        "uses a computed fixture"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/partial.case.ts",
+        "line": 9,
+        "column": 1
+      },
+      "runKind": "stateful-object",
+      "targets": [
+        {
+          "id": "t1",
+          "kind": "class",
+          "sourceFile": "src/internal/order-service.ts",
+          "sourceExport": "OrderService",
+          "importedAs": "OrderService",
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/partial.case.ts",
+            "line": 3,
+            "column": 10
+          },
+          "publicApi": {
+            "status": "mapped",
+            "specifier": "@sample/order-client",
+            "exportName": "OrderService",
+            "evidence": "checker: src/internal/order-service.ts의 OrderService ≡ @sample/order-client의 export 'OrderService' (같은 선언 심볼)"
+          }
+        }
+      ],
+      "doubles": [
+        {
+          "id": "http",
+          "varName": "http",
+          "shape": "object",
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/partial.case.ts",
+            "line": 10,
+            "column": 16
+          },
+          "methods": {
+            "post": {
+              "behavior": {
+                "kind": "resolves",
+                "value": {
+                  "id": "o-1",
+                  "status": "created"
+                }
+              },
+              "loc": {
+                "file": "../../stage/test/fixtures/cases/partial.case.ts",
+                "line": 10,
+                "column": 18
+              }
+            },
+            "get": {
+              "behavior": {
+                "kind": "noop"
+              },
+              "loc": {
+                "file": "../../stage/test/fixtures/cases/partial.case.ts",
+                "line": 10,
+                "column": 81
+              }
+            }
+          },
+          "collaboratorOf": {
+            "step": "s1",
+            "param": "http",
+            "type": "HttpClient"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "kind": "construct",
+          "target": "t1",
+          "instance": "i1",
+          "args": [
+            {
+              "kind": "double",
+              "id": "http"
+            }
+          ],
+          "params": [
+            {
+              "name": "http",
+              "optional": false,
+              "type": "HttpClient",
+              "schema": {
+                "kind": "object",
+                "name": "HttpClient",
+                "props": {
+                  "post": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string, body: unknown, options?: RequestOptions | undefined) => Promise<T>"
+                    },
+                    "optional": false
+                  },
+                  "get": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string) => Promise<T>"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            }
+          ],
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/partial.case.ts",
+            "line": 11,
+            "column": 19
+          },
+          "source": "new OrderService(http)"
+        },
+        {
+          "id": "s2",
+          "kind": "call",
+          "instance": "i1",
+          "method": "placeOrder",
+          "args": [
+            {
+              "kind": "value",
+              "value": {
+                "$stage": "unknown",
+                "reason": "호출 대상(makeInput)이 검증 대상 공개 API·인스턴스가 아님(보조 함수 결과는 정적으로 알 수 없음)"
+              }
+            }
+          ],
+          "params": [
+            {
+              "name": "input",
+              "optional": false,
+              "type": "OrderInput",
+              "schema": {
+                "kind": "object",
+                "name": "OrderInput",
+                "props": {
+                  "sku": {
+                    "schema": {
+                      "kind": "string"
+                    },
+                    "optional": false
+                  },
+                  "quantity": {
+                    "schema": {
+                      "kind": "number"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            },
+            {
+              "name": "options",
+              "optional": true,
+              "type": "PlaceOrderOptions",
+              "schema": {
+                "kind": "object",
+                "name": "PlaceOrderOptions",
+                "props": {
+                  "idempotencyKey": {
+                    "schema": {
+                      "kind": "string"
+                    },
+                    "optional": true
+                  }
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "object",
+            "name": "OrderResult",
+            "props": {
+              "orderId": {
+                "schema": {
+                  "kind": "string"
+                },
+                "optional": false
+              },
+              "status": {
+                "schema": {
+                  "kind": "union",
+                  "options": [
+                    {
+                      "kind": "literal",
+                      "value": "created"
+                    },
+                    {
+                      "kind": "literal",
+                      "value": "pending"
+                    }
+                  ]
+                },
+                "optional": false
+              }
+            }
+          },
+          "returnsText": "OrderResult",
+          "awaited": true,
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/partial.case.ts",
+            "line": 12,
+            "column": 24
+          },
+          "source": "service.placeOrder(makeInput())"
+        },
+        {
+          "id": "s3",
+          "kind": "check",
+          "check": {
+            "id": "c1",
+            "kind": "compare",
+            "module": "node:assert/strict",
+            "op": "equal",
+            "subject": {
+              "kind": "result",
+              "step": "s2",
+              "path": [
+                "orderId"
+              ]
+            },
+            "expected": "o-1",
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/partial.case.ts",
+              "line": 13,
+              "column": 3
+            },
+            "source": "assert.equal(result.orderId, 'o-1')"
+          }
+        }
+      ],
+      "teardown": [],
+      "support": {
+        "status": "partial",
+        "findings": [
+          {
+            "ruleId": "arg/unknown",
+            "level": "partial",
+            "message": "인자 'input'을(를) 정적으로 확정하지 못함 — 연결 필요: 호출 대상(makeInput)이 검증 대상 공개 API·인스턴스가 아님(보조 함수 결과는 정적으로 알 수 없음)",
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/partial.case.ts",
+              "line": 12,
+              "column": 43
+            },
+            "evidence": "makeInput()"
+          }
+        ]
+      },
+      "consumerLink": {
+        "status": "linked",
+        "setupExport": "createOrderClient",
+        "operations": [
+          "placeOrder"
+        ],
+        "evidence": "checker: createOrderClient(...)의 반환 타입이 OrderService → 같은 공개 메서드(placeOrder)를 컨슈머 초기화 경로로 호출 가능"
+      }
+    }
+  ]
+}

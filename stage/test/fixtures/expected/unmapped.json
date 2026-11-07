@@ -1,0 +1,195 @@
+{
+  "status": "partial",
+  "rulesVersion": "london-node-test/1.0.0",
+  "imports": [
+    {
+      "specifier": "node:test",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "it"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/unmapped.case.ts",
+        "line": 1,
+        "column": 1
+      },
+      "evidence": "node:test: 인식기 있는 테스트 도구"
+    },
+    {
+      "specifier": "node:assert/strict",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "default"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/unmapped.case.ts",
+        "line": 2,
+        "column": 1
+      },
+      "evidence": "node:assert/strict: 인식기 있는 테스트 도구"
+    },
+    {
+      "specifier": "../../../../examples/order-client/src/http.ts",
+      "kind": "static",
+      "role": "target-source",
+      "resolvedFile": "src/http.ts",
+      "names": [
+        "createFetchHttpClient"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/unmapped.case.ts",
+        "line": 3,
+        "column": 1
+      },
+      "evidence": "공개 entry에서 도달 가능한 소스: src/http.ts"
+    }
+  ],
+  "findings": [],
+  "scenarios": [
+    {
+      "id": "sc1",
+      "title": "builds a client",
+      "path": [
+        "builds a client"
+      ],
+      "loc": {
+        "file": "../../stage/test/fixtures/cases/unmapped.case.ts",
+        "line": 5,
+        "column": 1
+      },
+      "runKind": "function",
+      "targets": [
+        {
+          "id": "t1",
+          "kind": "function",
+          "sourceFile": "src/http.ts",
+          "sourceExport": "createFetchHttpClient",
+          "importedAs": "createFetchHttpClient",
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/unmapped.case.ts",
+            "line": 3,
+            "column": 10
+          },
+          "publicApi": {
+            "status": "unmapped",
+            "evidence": "createFetchHttpClient은(는) 공개 entry(@sample/order-client)의 export와 같은 심볼이 아님"
+          }
+        }
+      ],
+      "doubles": [],
+      "steps": [
+        {
+          "id": "s1",
+          "kind": "call",
+          "target": "t1",
+          "args": [
+            {
+              "kind": "value",
+              "value": {
+                "baseUrl": "http://x.invalid"
+              }
+            }
+          ],
+          "params": [
+            {
+              "name": "config",
+              "optional": false,
+              "type": "FetchHttpConfig",
+              "schema": {
+                "kind": "object",
+                "name": "FetchHttpConfig",
+                "props": {
+                  "baseUrl": {
+                    "schema": {
+                      "kind": "string"
+                    },
+                    "optional": false
+                  },
+                  "token": {
+                    "schema": {
+                      "kind": "string"
+                    },
+                    "optional": true
+                  },
+                  "timeoutMs": {
+                    "schema": {
+                      "kind": "number"
+                    },
+                    "optional": true
+                  }
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "object",
+            "name": "HttpClient",
+            "props": {
+              "post": {
+                "schema": {
+                  "kind": "function",
+                  "text": "<T>(path: string, body: unknown, options?: RequestOptions | undefined) => Promise<T>"
+                },
+                "optional": false
+              },
+              "get": {
+                "schema": {
+                  "kind": "function",
+                  "text": "<T>(path: string) => Promise<T>"
+                },
+                "optional": false
+              }
+            }
+          },
+          "returnsText": "HttpClient",
+          "awaited": false,
+          "loc": {
+            "file": "../../stage/test/fixtures/cases/unmapped.case.ts",
+            "line": 6,
+            "column": 18
+          },
+          "source": "createFetchHttpClient({ baseUrl: 'http://x.invalid' })"
+        },
+        {
+          "id": "s2",
+          "kind": "check",
+          "check": {
+            "id": "c1",
+            "kind": "compare",
+            "module": "node:assert/strict",
+            "op": "ok",
+            "subject": {
+              "kind": "result",
+              "step": "s1",
+              "path": []
+            },
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/unmapped.case.ts",
+              "line": 7,
+              "column": 3
+            },
+            "source": "assert.ok(client)"
+          }
+        }
+      ],
+      "teardown": [],
+      "support": {
+        "status": "partial",
+        "findings": [
+          {
+            "ruleId": "public/map",
+            "level": "partial",
+            "message": "대상 createFetchHttpClient의 공개 API 대응을 찾지 못함 — 배포 후보에서 실행할 수 없음: createFetchHttpClient은(는) 공개 entry(@sample/order-client)의 export와 같은 심볼이 아님",
+            "loc": {
+              "file": "../../stage/test/fixtures/cases/unmapped.case.ts",
+              "line": 3,
+              "column": 10
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

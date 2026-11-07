@@ -1,0 +1,1332 @@
+{
+  "status": "auto",
+  "rulesVersion": "london-node-test/1.0.0",
+  "imports": [
+    {
+      "specifier": "node:test",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "describe",
+        "it",
+        "beforeEach",
+        "mock"
+      ],
+      "loc": {
+        "file": "test/order-service.test.ts",
+        "line": 1,
+        "column": 1
+      },
+      "evidence": "node:test: 인식기 있는 테스트 도구"
+    },
+    {
+      "specifier": "node:assert/strict",
+      "kind": "static",
+      "role": "test-tool",
+      "names": [
+        "default"
+      ],
+      "loc": {
+        "file": "test/order-service.test.ts",
+        "line": 2,
+        "column": 1
+      },
+      "evidence": "node:assert/strict: 인식기 있는 테스트 도구"
+    },
+    {
+      "specifier": "../src/internal/order-service.ts",
+      "kind": "static",
+      "role": "target-source",
+      "resolvedFile": "src/internal/order-service.ts",
+      "names": [
+        "OrderService"
+      ],
+      "loc": {
+        "file": "test/order-service.test.ts",
+        "line": 3,
+        "column": 1
+      },
+      "evidence": "공개 entry에서 도달 가능한 소스: src/internal/order-service.ts"
+    },
+    {
+      "specifier": "../src/errors.ts",
+      "kind": "static",
+      "role": "target-source",
+      "resolvedFile": "src/errors.ts",
+      "names": [
+        "HttpError"
+      ],
+      "loc": {
+        "file": "test/order-service.test.ts",
+        "line": 4,
+        "column": 1
+      },
+      "evidence": "공개 entry에서 도달 가능한 소스: src/errors.ts"
+    }
+  ],
+  "findings": [],
+  "scenarios": [
+    {
+      "id": "sc1",
+      "title": "posts the order to the http collaborator and maps the response",
+      "path": [
+        "OrderService.placeOrder",
+        "posts the order to the http collaborator and maps the response"
+      ],
+      "loc": {
+        "file": "test/order-service.test.ts",
+        "line": 20,
+        "column": 3
+      },
+      "runKind": "stateful-object",
+      "targets": [
+        {
+          "id": "t1",
+          "kind": "class",
+          "sourceFile": "src/internal/order-service.ts",
+          "sourceExport": "OrderService",
+          "importedAs": "OrderService",
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 3,
+            "column": 10
+          },
+          "publicApi": {
+            "status": "mapped",
+            "specifier": "@sample/order-client",
+            "exportName": "OrderService",
+            "evidence": "checker: src/internal/order-service.ts의 OrderService ≡ @sample/order-client의 export 'OrderService' (같은 선언 심볼)"
+          }
+        }
+      ],
+      "doubles": [
+        {
+          "id": "http",
+          "varName": "http",
+          "shape": "object",
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 13,
+            "column": 12
+          },
+          "methods": {
+            "post": {
+              "behavior": {
+                "kind": "resolves",
+                "value": {
+                  "id": "ord-1001",
+                  "sku": "SKU-1",
+                  "quantity": 2,
+                  "status": "created"
+                }
+              },
+              "loc": {
+                "file": "test/order-service.test.ts",
+                "line": 14,
+                "column": 7
+              }
+            },
+            "get": {
+              "behavior": {
+                "kind": "noop"
+              },
+              "loc": {
+                "file": "test/order-service.test.ts",
+                "line": 15,
+                "column": 7
+              }
+            }
+          },
+          "collaboratorOf": {
+            "step": "s1",
+            "param": "http",
+            "type": "HttpClient"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "kind": "construct",
+          "target": "t1",
+          "instance": "i1",
+          "args": [
+            {
+              "kind": "double",
+              "id": "http"
+            }
+          ],
+          "params": [
+            {
+              "name": "http",
+              "optional": false,
+              "type": "HttpClient",
+              "schema": {
+                "kind": "object",
+                "name": "HttpClient",
+                "props": {
+                  "post": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string, body: unknown, options?: RequestOptions | undefined) => Promise<T>"
+                    },
+                    "optional": false
+                  },
+                  "get": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string) => Promise<T>"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            }
+          ],
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 17,
+            "column": 15
+          },
+          "source": "new OrderService(http)"
+        },
+        {
+          "id": "s2",
+          "kind": "call",
+          "instance": "i1",
+          "method": "placeOrder",
+          "args": [
+            {
+              "kind": "value",
+              "value": {
+                "sku": "SKU-1",
+                "quantity": 2
+              }
+            },
+            {
+              "kind": "value",
+              "value": {
+                "idempotencyKey": "key-1"
+              }
+            }
+          ],
+          "params": [
+            {
+              "name": "input",
+              "optional": false,
+              "type": "OrderInput",
+              "schema": {
+                "kind": "object",
+                "name": "OrderInput",
+                "props": {
+                  "sku": {
+                    "schema": {
+                      "kind": "string"
+                    },
+                    "optional": false
+                  },
+                  "quantity": {
+                    "schema": {
+                      "kind": "number"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            },
+            {
+              "name": "options",
+              "optional": true,
+              "type": "PlaceOrderOptions",
+              "schema": {
+                "kind": "object",
+                "name": "PlaceOrderOptions",
+                "props": {
+                  "idempotencyKey": {
+                    "schema": {
+                      "kind": "string"
+                    },
+                    "optional": true
+                  }
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "object",
+            "name": "OrderResult",
+            "props": {
+              "orderId": {
+                "schema": {
+                  "kind": "string"
+                },
+                "optional": false
+              },
+              "status": {
+                "schema": {
+                  "kind": "union",
+                  "options": [
+                    {
+                      "kind": "literal",
+                      "value": "created"
+                    },
+                    {
+                      "kind": "literal",
+                      "value": "pending"
+                    }
+                  ]
+                },
+                "optional": false
+              }
+            }
+          },
+          "returnsText": "OrderResult",
+          "awaited": true,
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 21,
+            "column": 26
+          },
+          "source": "service.placeOrder({ sku: 'SKU-1', quantity: 2 }, { idempotencyKey: 'key-1' })"
+        },
+        {
+          "id": "s3",
+          "kind": "check",
+          "check": {
+            "id": "c1",
+            "kind": "compare",
+            "module": "node:assert/strict",
+            "op": "deepEqual",
+            "subject": {
+              "kind": "result",
+              "step": "s2",
+              "path": []
+            },
+            "expected": {
+              "orderId": "ord-1001",
+              "status": "created"
+            },
+            "loc": {
+              "file": "test/order-service.test.ts",
+              "line": 23,
+              "column": 5
+            },
+            "source": "assert.deepEqual(result, { orderId: 'ord-1001', status: 'created' })"
+          }
+        },
+        {
+          "id": "s4",
+          "kind": "check",
+          "check": {
+            "id": "c2",
+            "kind": "compare",
+            "module": "node:assert/strict",
+            "op": "equal",
+            "subject": {
+              "kind": "callCount",
+              "double": "http",
+              "method": "post"
+            },
+            "expected": 1,
+            "loc": {
+              "file": "test/order-service.test.ts",
+              "line": 24,
+              "column": 5
+            },
+            "source": "assert.equal(http.post.mock.callCount(), 1)"
+          }
+        },
+        {
+          "id": "s5",
+          "kind": "check",
+          "check": {
+            "id": "c3",
+            "kind": "compare",
+            "module": "node:assert/strict",
+            "op": "deepEqual",
+            "subject": {
+              "kind": "callArgs",
+              "double": "http",
+              "method": "post",
+              "call": 0
+            },
+            "expected": [
+              "/orders",
+              {
+                "sku": "SKU-1",
+                "quantity": 2
+              },
+              {
+                "idempotencyKey": "key-1"
+              }
+            ],
+            "loc": {
+              "file": "test/order-service.test.ts",
+              "line": 25,
+              "column": 5
+            },
+            "source": "assert.deepEqual(http.post.mock.calls[0].arguments, [ '/orders', { sku: 'SKU-1', quantity: 2 }, { idempotencyKey: 'key-1' }, ])"
+          }
+        },
+        {
+          "id": "s6",
+          "kind": "check",
+          "check": {
+            "id": "c4",
+            "kind": "compare",
+            "module": "node:assert/strict",
+            "op": "equal",
+            "subject": {
+              "kind": "callCount",
+              "double": "http",
+              "method": "get"
+            },
+            "expected": 0,
+            "loc": {
+              "file": "test/order-service.test.ts",
+              "line": 30,
+              "column": 5
+            },
+            "source": "assert.equal(http.get.mock.callCount(), 0)"
+          }
+        }
+      ],
+      "teardown": [],
+      "support": {
+        "status": "auto",
+        "findings": []
+      },
+      "consumerLink": {
+        "status": "linked",
+        "setupExport": "createOrderClient",
+        "operations": [
+          "placeOrder"
+        ],
+        "evidence": "checker: createOrderClient(...)의 반환 타입이 OrderService → 같은 공개 메서드(placeOrder)를 컨슈머 초기화 경로로 호출 가능"
+      }
+    },
+    {
+      "id": "sc2",
+      "title": "rejects an invalid quantity without calling the collaborator",
+      "path": [
+        "OrderService.placeOrder",
+        "rejects an invalid quantity without calling the collaborator"
+      ],
+      "loc": {
+        "file": "test/order-service.test.ts",
+        "line": 33,
+        "column": 3
+      },
+      "runKind": "stateful-object",
+      "targets": [
+        {
+          "id": "t1",
+          "kind": "class",
+          "sourceFile": "src/internal/order-service.ts",
+          "sourceExport": "OrderService",
+          "importedAs": "OrderService",
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 3,
+            "column": 10
+          },
+          "publicApi": {
+            "status": "mapped",
+            "specifier": "@sample/order-client",
+            "exportName": "OrderService",
+            "evidence": "checker: src/internal/order-service.ts의 OrderService ≡ @sample/order-client의 export 'OrderService' (같은 선언 심볼)"
+          }
+        }
+      ],
+      "doubles": [
+        {
+          "id": "http",
+          "varName": "http",
+          "shape": "object",
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 13,
+            "column": 12
+          },
+          "methods": {
+            "post": {
+              "behavior": {
+                "kind": "resolves",
+                "value": {
+                  "id": "ord-1001",
+                  "sku": "SKU-1",
+                  "quantity": 2,
+                  "status": "created"
+                }
+              },
+              "loc": {
+                "file": "test/order-service.test.ts",
+                "line": 14,
+                "column": 7
+              }
+            },
+            "get": {
+              "behavior": {
+                "kind": "noop"
+              },
+              "loc": {
+                "file": "test/order-service.test.ts",
+                "line": 15,
+                "column": 7
+              }
+            }
+          },
+          "collaboratorOf": {
+            "step": "s1",
+            "param": "http",
+            "type": "HttpClient"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "kind": "construct",
+          "target": "t1",
+          "instance": "i1",
+          "args": [
+            {
+              "kind": "double",
+              "id": "http"
+            }
+          ],
+          "params": [
+            {
+              "name": "http",
+              "optional": false,
+              "type": "HttpClient",
+              "schema": {
+                "kind": "object",
+                "name": "HttpClient",
+                "props": {
+                  "post": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string, body: unknown, options?: RequestOptions | undefined) => Promise<T>"
+                    },
+                    "optional": false
+                  },
+                  "get": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string) => Promise<T>"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            }
+          ],
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 17,
+            "column": 15
+          },
+          "source": "new OrderService(http)"
+        },
+        {
+          "id": "s2",
+          "kind": "call",
+          "instance": "i1",
+          "method": "placeOrder",
+          "args": [
+            {
+              "kind": "value",
+              "value": {
+                "sku": "SKU-1",
+                "quantity": 0
+              }
+            }
+          ],
+          "params": [
+            {
+              "name": "input",
+              "optional": false,
+              "type": "OrderInput",
+              "schema": {
+                "kind": "object",
+                "name": "OrderInput",
+                "props": {
+                  "sku": {
+                    "schema": {
+                      "kind": "string"
+                    },
+                    "optional": false
+                  },
+                  "quantity": {
+                    "schema": {
+                      "kind": "number"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            },
+            {
+              "name": "options",
+              "optional": true,
+              "type": "PlaceOrderOptions",
+              "schema": {
+                "kind": "object",
+                "name": "PlaceOrderOptions",
+                "props": {
+                  "idempotencyKey": {
+                    "schema": {
+                      "kind": "string"
+                    },
+                    "optional": true
+                  }
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "object",
+            "name": "OrderResult",
+            "props": {
+              "orderId": {
+                "schema": {
+                  "kind": "string"
+                },
+                "optional": false
+              },
+              "status": {
+                "schema": {
+                  "kind": "union",
+                  "options": [
+                    {
+                      "kind": "literal",
+                      "value": "created"
+                    },
+                    {
+                      "kind": "literal",
+                      "value": "pending"
+                    }
+                  ]
+                },
+                "optional": false
+              }
+            }
+          },
+          "returnsText": "OrderResult",
+          "awaited": false,
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 34,
+            "column": 26
+          },
+          "source": "service.placeOrder({ sku: 'SKU-1', quantity: 0 })"
+        },
+        {
+          "id": "s3",
+          "kind": "check",
+          "check": {
+            "id": "c1",
+            "kind": "error",
+            "module": "node:assert/strict",
+            "op": "rejects",
+            "step": "s2",
+            "matcher": {
+              "kind": "object",
+              "value": {
+                "name": "ValidationError",
+                "message": "quantity must be an integer between 1 and 99"
+              }
+            },
+            "loc": {
+              "file": "test/order-service.test.ts",
+              "line": 34,
+              "column": 11
+            },
+            "source": "assert.rejects(service.placeOrder({ sku: 'SKU-1', quantity: 0 }), { name: 'ValidationError', message: 'quantity must be an integer between 1 and 99', })"
+          }
+        },
+        {
+          "id": "s4",
+          "kind": "check",
+          "check": {
+            "id": "c2",
+            "kind": "compare",
+            "module": "node:assert/strict",
+            "op": "equal",
+            "subject": {
+              "kind": "callCount",
+              "double": "http",
+              "method": "post"
+            },
+            "expected": 0,
+            "loc": {
+              "file": "test/order-service.test.ts",
+              "line": 38,
+              "column": 5
+            },
+            "source": "assert.equal(http.post.mock.callCount(), 0)"
+          }
+        }
+      ],
+      "teardown": [],
+      "support": {
+        "status": "auto",
+        "findings": []
+      },
+      "consumerLink": {
+        "status": "linked",
+        "setupExport": "createOrderClient",
+        "operations": [
+          "placeOrder"
+        ],
+        "evidence": "checker: createOrderClient(...)의 반환 타입이 OrderService → 같은 공개 메서드(placeOrder)를 컨슈머 초기화 경로로 호출 가능"
+      }
+    },
+    {
+      "id": "sc3",
+      "title": "propagates collaborator failures",
+      "path": [
+        "OrderService.placeOrder",
+        "propagates collaborator failures"
+      ],
+      "loc": {
+        "file": "test/order-service.test.ts",
+        "line": 41,
+        "column": 3
+      },
+      "runKind": "stateful-object",
+      "targets": [
+        {
+          "id": "t1",
+          "kind": "class",
+          "sourceFile": "src/internal/order-service.ts",
+          "sourceExport": "OrderService",
+          "importedAs": "OrderService",
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 3,
+            "column": 10
+          },
+          "publicApi": {
+            "status": "mapped",
+            "specifier": "@sample/order-client",
+            "exportName": "OrderService",
+            "evidence": "checker: src/internal/order-service.ts의 OrderService ≡ @sample/order-client의 export 'OrderService' (같은 선언 심볼)"
+          }
+        },
+        {
+          "id": "t2",
+          "kind": "class",
+          "sourceFile": "src/errors.ts",
+          "sourceExport": "HttpError",
+          "importedAs": "HttpError",
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 4,
+            "column": 10
+          },
+          "publicApi": {
+            "status": "mapped",
+            "specifier": "@sample/order-client",
+            "exportName": "HttpError",
+            "evidence": "checker: src/errors.ts의 HttpError ≡ @sample/order-client의 export 'HttpError' (같은 선언 심볼)"
+          }
+        }
+      ],
+      "doubles": [
+        {
+          "id": "http",
+          "varName": "http",
+          "shape": "object",
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 13,
+            "column": 12
+          },
+          "methods": {
+            "post": {
+              "behavior": {
+                "kind": "resolves",
+                "value": {
+                  "id": "ord-1001",
+                  "sku": "SKU-1",
+                  "quantity": 2,
+                  "status": "created"
+                }
+              },
+              "loc": {
+                "file": "test/order-service.test.ts",
+                "line": 14,
+                "column": 7
+              }
+            },
+            "get": {
+              "behavior": {
+                "kind": "noop"
+              },
+              "loc": {
+                "file": "test/order-service.test.ts",
+                "line": 15,
+                "column": 7
+              }
+            }
+          },
+          "collaboratorOf": {
+            "step": "s1",
+            "param": "http",
+            "type": "HttpClient"
+          }
+        },
+        {
+          "id": "failingHttp",
+          "varName": "failingHttp",
+          "shape": "object",
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 42,
+            "column": 25
+          },
+          "methods": {
+            "post": {
+              "behavior": {
+                "kind": "rejects",
+                "value": {
+                  "$stage": "construct",
+                  "export": "HttpError",
+                  "sourceExport": "HttpError",
+                  "args": [
+                    503,
+                    "order backend unavailable"
+                  ]
+                }
+              },
+              "loc": {
+                "file": "test/order-service.test.ts",
+                "line": 43,
+                "column": 7
+              }
+            },
+            "get": {
+              "behavior": {
+                "kind": "noop"
+              },
+              "loc": {
+                "file": "test/order-service.test.ts",
+                "line": 46,
+                "column": 7
+              }
+            }
+          },
+          "collaboratorOf": {
+            "step": "s2",
+            "param": "http",
+            "type": "HttpClient"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "kind": "construct",
+          "target": "t1",
+          "instance": "i1",
+          "args": [
+            {
+              "kind": "double",
+              "id": "http"
+            }
+          ],
+          "params": [
+            {
+              "name": "http",
+              "optional": false,
+              "type": "HttpClient",
+              "schema": {
+                "kind": "object",
+                "name": "HttpClient",
+                "props": {
+                  "post": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string, body: unknown, options?: RequestOptions | undefined) => Promise<T>"
+                    },
+                    "optional": false
+                  },
+                  "get": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string) => Promise<T>"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            }
+          ],
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 17,
+            "column": 15
+          },
+          "source": "new OrderService(http)"
+        },
+        {
+          "id": "s2",
+          "kind": "construct",
+          "target": "t1",
+          "instance": "i2",
+          "args": [
+            {
+              "kind": "double",
+              "id": "failingHttp"
+            }
+          ],
+          "params": [
+            {
+              "name": "http",
+              "optional": false,
+              "type": "HttpClient",
+              "schema": {
+                "kind": "object",
+                "name": "HttpClient",
+                "props": {
+                  "post": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string, body: unknown, options?: RequestOptions | undefined) => Promise<T>"
+                    },
+                    "optional": false
+                  },
+                  "get": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string) => Promise<T>"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            }
+          ],
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 48,
+            "column": 28
+          },
+          "source": "new OrderService(failingHttp)"
+        },
+        {
+          "id": "s3",
+          "kind": "call",
+          "instance": "i2",
+          "method": "placeOrder",
+          "args": [
+            {
+              "kind": "value",
+              "value": {
+                "sku": "SKU-1",
+                "quantity": 1
+              }
+            }
+          ],
+          "params": [
+            {
+              "name": "input",
+              "optional": false,
+              "type": "OrderInput",
+              "schema": {
+                "kind": "object",
+                "name": "OrderInput",
+                "props": {
+                  "sku": {
+                    "schema": {
+                      "kind": "string"
+                    },
+                    "optional": false
+                  },
+                  "quantity": {
+                    "schema": {
+                      "kind": "number"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            },
+            {
+              "name": "options",
+              "optional": true,
+              "type": "PlaceOrderOptions",
+              "schema": {
+                "kind": "object",
+                "name": "PlaceOrderOptions",
+                "props": {
+                  "idempotencyKey": {
+                    "schema": {
+                      "kind": "string"
+                    },
+                    "optional": true
+                  }
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "object",
+            "name": "OrderResult",
+            "props": {
+              "orderId": {
+                "schema": {
+                  "kind": "string"
+                },
+                "optional": false
+              },
+              "status": {
+                "schema": {
+                  "kind": "union",
+                  "options": [
+                    {
+                      "kind": "literal",
+                      "value": "created"
+                    },
+                    {
+                      "kind": "literal",
+                      "value": "pending"
+                    }
+                  ]
+                },
+                "optional": false
+              }
+            }
+          },
+          "returnsText": "OrderResult",
+          "awaited": false,
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 50,
+            "column": 26
+          },
+          "source": "failingService.placeOrder({ sku: 'SKU-1', quantity: 1 })"
+        },
+        {
+          "id": "s4",
+          "kind": "check",
+          "check": {
+            "id": "c1",
+            "kind": "error",
+            "module": "node:assert/strict",
+            "op": "rejects",
+            "step": "s3",
+            "matcher": {
+              "kind": "ctor",
+              "target": "t2"
+            },
+            "loc": {
+              "file": "test/order-service.test.ts",
+              "line": 50,
+              "column": 11
+            },
+            "source": "assert.rejects(failingService.placeOrder({ sku: 'SKU-1', quantity: 1 }), HttpError)"
+          }
+        },
+        {
+          "id": "s5",
+          "kind": "check",
+          "check": {
+            "id": "c2",
+            "kind": "compare",
+            "module": "node:assert/strict",
+            "op": "equal",
+            "subject": {
+              "kind": "callCount",
+              "double": "failingHttp",
+              "method": "post"
+            },
+            "expected": 1,
+            "loc": {
+              "file": "test/order-service.test.ts",
+              "line": 51,
+              "column": 5
+            },
+            "source": "assert.equal(failingHttp.post.mock.callCount(), 1)"
+          }
+        }
+      ],
+      "teardown": [],
+      "support": {
+        "status": "auto",
+        "findings": []
+      },
+      "consumerLink": {
+        "status": "linked",
+        "setupExport": "createOrderClient",
+        "operations": [
+          "placeOrder"
+        ],
+        "evidence": "checker: createOrderClient(...)의 반환 타입이 OrderService → 같은 공개 메서드(placeOrder)를 컨슈머 초기화 경로로 호출 가능"
+      }
+    },
+    {
+      "id": "sc4",
+      "title": "requests the order by id and maps the detail",
+      "path": [
+        "OrderService.getOrder",
+        "requests the order by id and maps the detail"
+      ],
+      "loc": {
+        "file": "test/order-service.test.ts",
+        "line": 56,
+        "column": 3
+      },
+      "runKind": "stateful-object",
+      "targets": [
+        {
+          "id": "t1",
+          "kind": "class",
+          "sourceFile": "src/internal/order-service.ts",
+          "sourceExport": "OrderService",
+          "importedAs": "OrderService",
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 3,
+            "column": 10
+          },
+          "publicApi": {
+            "status": "mapped",
+            "specifier": "@sample/order-client",
+            "exportName": "OrderService",
+            "evidence": "checker: src/internal/order-service.ts의 OrderService ≡ @sample/order-client의 export 'OrderService' (같은 선언 심볼)"
+          }
+        }
+      ],
+      "doubles": [
+        {
+          "id": "http",
+          "varName": "http",
+          "shape": "object",
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 57,
+            "column": 18
+          },
+          "methods": {
+            "post": {
+              "behavior": {
+                "kind": "noop"
+              },
+              "loc": {
+                "file": "test/order-service.test.ts",
+                "line": 58,
+                "column": 7
+              }
+            },
+            "get": {
+              "behavior": {
+                "kind": "resolves",
+                "value": {
+                  "id": "ord-1001",
+                  "sku": "SKU-1",
+                  "quantity": 2,
+                  "status": "created"
+                }
+              },
+              "loc": {
+                "file": "test/order-service.test.ts",
+                "line": 59,
+                "column": 7
+              }
+            }
+          },
+          "collaboratorOf": {
+            "step": "s1",
+            "param": "http",
+            "type": "HttpClient"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "kind": "construct",
+          "target": "t1",
+          "instance": "i1",
+          "args": [
+            {
+              "kind": "double",
+              "id": "http"
+            }
+          ],
+          "params": [
+            {
+              "name": "http",
+              "optional": false,
+              "type": "HttpClient",
+              "schema": {
+                "kind": "object",
+                "name": "HttpClient",
+                "props": {
+                  "post": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string, body: unknown, options?: RequestOptions | undefined) => Promise<T>"
+                    },
+                    "optional": false
+                  },
+                  "get": {
+                    "schema": {
+                      "kind": "function",
+                      "text": "<T>(path: string) => Promise<T>"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            }
+          ],
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 61,
+            "column": 21
+          },
+          "source": "new OrderService(http)"
+        },
+        {
+          "id": "s2",
+          "kind": "call",
+          "instance": "i1",
+          "method": "getOrder",
+          "args": [
+            {
+              "kind": "value",
+              "value": "ord-1001"
+            }
+          ],
+          "params": [
+            {
+              "name": "orderId",
+              "optional": false,
+              "type": "string",
+              "schema": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "object",
+            "name": "OrderDetail",
+            "props": {
+              "orderId": {
+                "schema": {
+                  "kind": "string"
+                },
+                "optional": false
+              },
+              "sku": {
+                "schema": {
+                  "kind": "string"
+                },
+                "optional": false
+              },
+              "quantity": {
+                "schema": {
+                  "kind": "number"
+                },
+                "optional": false
+              },
+              "status": {
+                "schema": {
+                  "kind": "union",
+                  "options": [
+                    {
+                      "kind": "literal",
+                      "value": "created"
+                    },
+                    {
+                      "kind": "literal",
+                      "value": "pending"
+                    }
+                  ]
+                },
+                "optional": false
+              }
+            }
+          },
+          "returnsText": "OrderDetail",
+          "awaited": true,
+          "loc": {
+            "file": "test/order-service.test.ts",
+            "line": 63,
+            "column": 26
+          },
+          "source": "service.getOrder('ord-1001')"
+        },
+        {
+          "id": "s3",
+          "kind": "check",
+          "check": {
+            "id": "c1",
+            "kind": "compare",
+            "module": "node:assert/strict",
+            "op": "deepEqual",
+            "subject": {
+              "kind": "result",
+              "step": "s2",
+              "path": []
+            },
+            "expected": {
+              "orderId": "ord-1001",
+              "sku": "SKU-1",
+              "quantity": 2,
+              "status": "created"
+            },
+            "loc": {
+              "file": "test/order-service.test.ts",
+              "line": 65,
+              "column": 5
+            },
+            "source": "assert.deepEqual(detail, { orderId: 'ord-1001', sku: 'SKU-1', quantity: 2, status: 'created' })"
+          }
+        },
+        {
+          "id": "s4",
+          "kind": "check",
+          "check": {
+            "id": "c2",
+            "kind": "compare",
+            "module": "node:assert/strict",
+            "op": "deepEqual",
+            "subject": {
+              "kind": "callArgs",
+              "double": "http",
+              "method": "get",
+              "call": 0
+            },
+            "expected": [
+              "/orders/ord-1001"
+            ],
+            "loc": {
+              "file": "test/order-service.test.ts",
+              "line": 66,
+              "column": 5
+            },
+            "source": "assert.deepEqual(http.get.mock.calls[0].arguments, ['/orders/ord-1001'])"
+          }
+        }
+      ],
+      "teardown": [],
+      "support": {
+        "status": "auto",
+        "findings": []
+      },
+      "consumerLink": {
+        "status": "linked",
+        "setupExport": "createOrderClient",
+        "operations": [
+          "getOrder"
+        ],
+        "evidence": "checker: createOrderClient(...)의 반환 타입이 OrderService → 같은 공개 메서드(getOrder)를 컨슈머 초기화 경로로 호출 가능"
+      }
+    }
+  ]
+}
