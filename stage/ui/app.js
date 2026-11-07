@@ -409,7 +409,7 @@ function renderOps(it) {
   $('#complete3').disabled = !active;
   $('#complete3').onclick = async () => { try { await api('POST', `/api/runs/${run.id}/complete-stage3`); } catch (e) { alert(e.message); } };
   const sp = $('#script-panel');
-  $('#complete3-hint').textContent = run.replayMode ? '원본 테스트를 배포 후보 파일로 재실행한 최신 결과로 판정합니다. 배포본이 한 번도 로드되지 않았거나 배포물에 없는 파일이 있으면 실패입니다.' : a.script ? '배포 exports 런타임 import 검증의 최신 결과와 치환 잔여로 판정합니다. 확인 필요 항목은 사람이 확인해 기록합니다.' : 'Stage 모드 조작의 시나리오별 최신 결과로만 판정합니다. Mock 조작은 별도로 보고합니다.';
+  $('#complete3-hint').textContent = run.replayMode ? '원본 테스트를 배포 후보 파일로 재실행한 최신 결과로 판정합니다. 브라우저 API에 의존하는 테스트는 mock 결과만으로 통과시키지 않고, 실제 브라우저 검증이 일치해야 통과합니다. 배포본이 한 번도 로드되지 않았거나 배포물에 없는 파일이 있어도 실패입니다.' : a.script ? '배포 exports 런타임 import 검증의 최신 결과와 치환 잔여로 판정합니다. 확인 필요 항목은 사람이 확인해 기록합니다.' : 'Stage 모드 조작의 시나리오별 최신 결과로만 판정합니다. Mock 조작은 별도로 보고합니다.';
   if (run.replayMode) {
     $('#wiring').replaceChildren(); $('#playground').replaceChildren(); $('#ops').replaceChildren();
     renderReplayPanel(it, sp, active);
@@ -508,9 +508,10 @@ const TEST_LABEL = { pass: ['s-pass', '통과'], fail: ['s-failed', '실패'], s
 function renderReplayPanel(it, host, active) {
   const run = it.run;
   const rp = run.replay;
+  const re = run.realEnv;
   const s1 = run.jobs.find((j) => j.kind === 'stage1')?.stage1;
   const running = run.jobs.some((j) => j.kind === 'replay' && (j.status === 'queued' || j.status === 'running'));
-  if (!it.rp) it.rp = { open: new Set(['tests']), filter: 'all' };
+  if (!it.rp) it.rp = { open: new Set(['tests', 'real']), filter: 'all' };
   const st = it.rp;
   if (host.dataset.run !== run.id) { host.dataset.run = run.id; host.replaceChildren(); }
   const tests = rp?.run.tests ?? [];
@@ -531,13 +532,27 @@ function renderReplayPanel(it, host, active) {
       <div class="exp-s small"><span class="muted">원본(1단계)</span> ${b ? badge(...TEST_LABEL[b.status]) : badge('s-not-applicable', '—')} <span class="muted">배포 후보</span> ${badge(...TEST_LABEL[t.status])} <span class="muted">${t.line ? `${esc(run.testFile.path)}:${t.line}` : ''}</span></div>${err}</div>`;
   }).join('') || '<p class="muted small">해당하는 항목 없음</p>';
   const modules = rp ? `<p class="small muted">원본 테스트가 import한 프로젝트 dist 파일이 아래 배포 후보 파일로 바뀌어 실행됐습니다(<code>${esc(rp.packageDir)}</code> 기준).</p>${rp.redirected.map((f) => `<div class="small"><code>${esc(f)}</code></div>`).join('') || '<p class="small muted">없음</p>'}${rp.missing.length ? `<p class="small">${badge('s-failed', '배포물에 없음')}</p>${rp.missing.map((f) => `<div class="small"><code>${esc(f)}</code></div>`).join('')}` : ''}` : '<p class="small muted">아직 실행하지 않았습니다.</p>';
+  const kv = (o) => Object.keys(o ?? {}).length ? Object.entries(o).map(([k, v]) => `<div class="small"><code>${esc(k)}</code> = <code>${esc(v)}</code></div>`).join('') : '<span class="small muted">비어 있음</span>';
+  const obs = (o, env) => !o ? '<span class="small muted">결과 없음</span>' : `${o.threw ? `<div class="small">${badge('s-failed', '예외')} ${esc(o.threw.name)}: ${esc(o.threw.message)}</div>` : ''}${env === 'browser' ? `<div class="small muted">실제 sessionStorage</div>${kv(o.storage?.sessionStorage)}<div class="small muted">실제 호출 순서</div>${(o.calls ?? []).map((c) => `<div class="small"><code>${esc(c.slice(0, 2).join('.'))}(${esc(c.slice(2).map((x) => JSON.stringify(x)).join(', '))})</code></div>`).join('') || '<span class="small muted">저장소 호출 없음</span>'}` : `<div class="small">window ${o.storage?.windowDefined ? '정의됨' : '<b>없음</b>(서버 환경)'}</div><div class="small muted">저장소 호출 ${(o.calls ?? []).length}회</div>`}`;
+  const vbadge = (v) => badge(v === 'pass' ? 's-pass' : 's-failed', v === 'pass' ? '일치' : v === 'fail' ? '불일치' : '오류');
+  const realRows = re ? re.scenarios.map((x) => {
+    const showRuns = x.runs.filter((r, i) => r.verdict !== 'pass' || i === 0);
+    return `<div class="exp-row"><div class="exp-h">${vbadge(x.verdict)}<span>${esc(x.testName)}</span> <span class="muted small">${x.env === 'browser' ? '실제 브라우저' : '서버(window 없음)'}</span></div>
+      <div class="exp-s small"><code>${esc(x.exportName)}(${esc(x.args.join(', '))})</code> <span class="muted">${esc(run.testFile.path)}:${x.line}</span></div>
+      <div class="small" style="margin:.2rem 0">${x.runs.map((r) => `${vbadge(r.verdict)} <span class="muted">${esc(r.browser)}</span>`).join(' &nbsp; ')}</div>
+      <div class="small muted">${esc(x.reason)}</div>
+      ${showRuns.map((r) => `<details style="margin-top:.3rem" ${r.verdict !== 'pass' ? 'open' : ''}><summary class="small">${esc(r.browser)} — 상세</summary><div class="row gap wrap" style="align-items:flex-start"><div style="flex:1;min-width:14rem"><div class="small"><b>프로젝트 dist(기준)</b></div>${obs(r.base, x.env)}</div><div style="flex:1;min-width:14rem"><div class="small"><b>배포 후보</b></div>${obs(r.cand, x.env)}</div></div></details>`).join('')}</div>`;
+  }).join('') + (re.skipped.length ? `<p class="small muted" style="margin-top:.6rem">재현하지 못해 건너뛴 호출 ${re.skipped.length}개: ${re.skipped.map((k) => `${esc(k.testName)}(${esc(k.reason)})`).join(' / ')}</p>` : '') : '';
+  const cover = re ? `<div class="small" style="margin:.4rem 0"><b>크로스브라우징 커버리지</b> ${re.browsers.map((b) => `${badge(b.ok ? 's-pass' : 's-failed', b.ok ? '실행' : '실패')} ${esc(b.name)}${b.ok ? '' : ` <span class="muted">(${esc(b.reason)})</span>`}`).join(' &nbsp; ') || '<span class="muted">브라우저 없음</span>'}${re.browsers.filter((b) => b.ok).length === 1 ? ` ${badge('s-not-applicable', '단일 브라우저 — 크로스브라우징 미확인')}` : ''}</div>` : '';
+  const realBody = re ? `<p class="small muted">테스트 안의 SUT 호출을 그대로 가져와 <b>설치된 실제 브라우저들</b>(실제 window.sessionStorage)에서 프로젝트 dist와 배포 후보에 각각 실행하고, 저장소 상태·호출 순서·반환·예외를 비교했습니다. 같은 배포 후보가 브라우저마다 다른 결과를 내는지도 비교합니다. mock은 쓰지 않습니다.</p>${cover}${re.status !== 'passed' ? `<p class="small">${badge('s-failed', '미통과')} ${esc(re.reason)}</p>` : ''}${realRows}` : '';
   const out = rp ? `<pre class="log">${esc(rp.run.output ?? '')}</pre>` : '';
   host.innerHTML = `<div class="card">
-    <h4>배포 후보 재실행 <span class="muted small"><code>${esc(run.testFile.path)}</code></span></h4>
-    <p class="small muted">이 테스트는 협력자를 대체 객체로 바꿔 호출 인자를 검증하는 런던파 스타일이라 입력→출력 조작 화면으로 옮기지 않습니다. 대신 <b>원본 테스트를 수정 없이</b> 실행하되, 프로젝트 <code>dist</code> import만 소비자 샌드박스에 설치된 <b>배포 후보 파일</b>로 바꿔 같은 mock·assert를 그대로 적용합니다. peer 의존성(React 등)은 테스트 쪽 사본을 공유합니다.</p>
-    <div class="metrics">${card('통과', rp ? `${nPass}/${tests.length}` : '—', rp ? (nFail ? `실패 ${nFail}개` : '실패 없음') : '')}${card('배포 후보 모듈', rp ? `${rp.redirected.length}개` : '—', rp?.missing.length ? `배포물에 없는 파일 ${rp.missing.length}개` : '로드된 파일')}${card('원본(1단계)', s1 ? `${s1.tests.filter((t) => t.status === 'pass').length}/${s1.tests.length}` : '—', '프로젝트 dist 기준')}</div>
+    <h4>${re ? '실환경 검증 · 배포 후보 재실행' : '배포 후보 재실행'} <span class="muted small"><code>${esc(run.testFile.path)}</code></span></h4>
+    <p class="small muted">이 테스트는 협력자를 대체 객체로 바꿔 호출 인자를 검증하는 런던파 스타일이라 입력→출력 조작 화면으로 옮기지 않습니다. 대신 <b>원본 테스트를 수정 없이</b>(mock 기준, 참고용) 실행하고, 브라우저 API를 쓰는 테스트는 별도로 <b>실제 브라우저 검증</b>을 합니다. 원본 재실행은, 프로젝트 <code>dist</code> import만 소비자 샌드박스에 설치된 <b>배포 후보 파일</b>로 바꿔 같은 mock·assert를 그대로 적용합니다. peer 의존성(React 등)은 테스트 쪽 사본을 공유합니다.</p>
+    <div class="metrics">${card('mock 재실행(참고)', rp ? `${nPass}/${tests.length}` : '—', rp ? (nFail ? `실패 ${nFail}개` : '협력자 mock 기준 · 실제 환경 아님') : '')}${card('배포 후보 모듈', rp ? `${rp.redirected.length}개` : '—', rp?.missing.length ? `배포물에 없는 파일 ${rp.missing.length}개` : '로드된 파일')}${re ? card('실제 브라우저 검증', `${re.scenarios.filter((x) => x.verdict === 'pass').length}/${re.scenarios.length}`, re.status === 'passed' ? '실제 환경 결과 일치' : '미통과') : ''}${card('원본(1단계)', s1 ? `${s1.tests.filter((t) => t.status === 'pass').length}/${s1.tests.length}` : '—', '프로젝트 dist 기준')}</div>
     <div class="row gap" style="margin:.6rem 0"><button class="btn primary rp-run" type="button" ${active && !running ? '' : 'disabled'}>${running ? '재실행 중…' : rp ? '배포 후보로 다시 실행' : '배포 후보로 실행'}</button></div>
-    ${section('tests', `시나리오별 결과 <span class="muted small">${tests.length}개</span>`, `<div class="row gap wrap small" style="margin:.2rem 0"><span class="mode">${filterBtn('all', '전체')}${filterBtn('fail', '실패')}${filterBtn('pass', '통과')}</span></div>${rows}`)}
+    ${re ? section('real', `실제 브라우저 검증 <span class="muted small">${re.scenarios.length}개 시나리오</span>`, realBody) : ''}
+    ${section('tests', `mock 재실행 결과(참고) <span class="muted small">${tests.length}개</span>`, `<div class="row gap wrap small" style="margin:.2rem 0"><span class="mode">${filterBtn('all', '전체')}${filterBtn('fail', '실패')}${filterBtn('pass', '통과')}</span></div>${rows}`)}
     ${section('modules', `로드된 배포 후보 모듈 <span class="muted small">${rp ? rp.redirected.length + '개' : ''}</span>`, modules)}
     ${section('out', '러너 출력', out || '<p class="small muted">아직 실행하지 않았습니다.</p>')}
   </div>`;

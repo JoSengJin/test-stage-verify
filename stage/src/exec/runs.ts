@@ -13,6 +13,7 @@ import { runStage1, type Stage1Result } from './stage1.ts';
 import { runScriptSandbox } from './script-run.ts';
 import { verifyExports } from './exports-verify.ts';
 import { runReplay, type ReplayResult } from './replay.ts';
+import { isBrowserDependent, runRealEnv, type RealEnvResult } from './real-env.ts';
 import type { ChildJob, MockRoute } from './child.ts';
 import { newId, redactText, sha256 } from '../util.ts';
 import type { Store } from '../store.ts';
@@ -95,6 +96,8 @@ export interface Run {
   /** 배포 후보 재실행 모드: 조작 화면으로 옮길 수 없는 테스트(런던파 등)를 원본 그대로 배포본에 대해 다시 실행한다. */
   replayMode?: boolean;
   replay?: ReplayResult;
+  /** 브라우저 의존 테스트: 같은 SUT 호출을 실제 브라우저에서 프로젝트 dist·배포 후보로 실행해 비교한 결과 */
+  realEnv?: RealEnvResult;
   stages: StageState[];
   jobs: Job[];
   manual: ManualCheck[];
@@ -112,7 +115,7 @@ export interface RunManagerOptions {
   onChange?: (run: Run) => void;
 }
 
-const DEFAULT_TIMEOUTS: Record<JobKind, number> = { stage1: 60_000, candidate: 240_000, contract: 60_000, scenario: 15_000, variant: 15_000, interaction: 20_000, script: 120_000, exports: 240_000, replay: 120_000 };
+const DEFAULT_TIMEOUTS: Record<JobKind, number> = { stage1: 60_000, candidate: 240_000, contract: 60_000, scenario: 15_000, variant: 15_000, interaction: 20_000, script: 120_000, exports: 240_000, replay: 300_000 };
 
 export class RunManager {
   runs = new Map<string, Run>();
@@ -452,9 +455,18 @@ export class RunManager {
       run.replay = r;
       job.replay = r;
       const nPass = r.run.tests.filter((t) => t.status === 'pass').length;
-      if (r.missing.length) { job.status = 'failed'; job.reason = `배포물에 없는 파일 ${r.missing.length}개: ${r.missing.slice(0, 3).join(', ')}`; }
+      // 브라우저 API에 의존하는 테스트는 mock 재실행만으로 통과시키지 않고, 실제 브라우저에서 같은 호출을 실행해 검증한다.
+      const testPath = path.join(run.project.root, run.testFile.path);
+      run.realEnv = undefined;
+      if (isBrowserDependent(testPath)) {
+        job.logs.push('브라우저 API 의존 테스트 → 실제 브라우저에서 실환경 검증 실행');
+        run.realEnv = await runRealEnv({ testFile: testPath, fromDir: from, packageDir: r.packageDir, projectRoot: run.project.root, outDir: this.store.runDir(run.id), signal, timeoutMs: job.timeoutMs - 5000, env: this.env, log: (m) => { job.logs.push(m); this.touch(run); } });
+        job.logs.push(`실환경 검증: ${run.realEnv.status} — ${run.realEnv.reason}`);
+      }
+      if (run.realEnv && run.realEnv.status !== 'passed') { job.status = 'failed'; job.reason = `실환경 검증 미통과: ${run.realEnv.reason}`; }
+      else if (r.missing.length) { job.status = 'failed'; job.reason = `배포물에 없는 파일 ${r.missing.length}개: ${r.missing.slice(0, 3).join(', ')}`; }
       else if (r.redirected.length === 0) { job.status = 'failed'; job.reason = '배포 후보 파일이 한 번도 로드되지 않음 — 테스트가 배포 단위를 import하지 않아 검증이 성립하지 않음'; }
-      else { job.status = r.run.status; job.reason = `배포 후보 모듈 ${r.redirected.length}개 로드 · 테스트 ${nPass}/${r.run.tests.length}개 통과${r.run.status === 'passed' ? '' : ` — ${r.run.reason}`}`; }
+      else { job.status = r.run.status; job.reason = `배포 후보 모듈 ${r.redirected.length}개 로드 · mock 재실행 ${nPass}/${r.run.tests.length}개 통과${run.realEnv ? ` · 실환경 ${run.realEnv.scenarios.length}개 시나리오 일치(${run.realEnv.browsers.filter((b) => b.ok).map((b) => b.name).join(', ') || 'Node'})` : ''}${r.run.status === 'passed' ? '' : ` — ${r.run.reason}`}`; }
       if (run.stages[2].status === 'running') run.stages[2].reason = `재실행 완료(${job.reason}) — 결과를 확인하고 3단계 판정을 확정하세요`;
     });
   }
@@ -636,7 +648,7 @@ export class RunManager {
       const jr = [...run.jobs].reverse().find((j) => j.kind === 'replay');
       if (!rp || !jr) { s3.status = 'failed'; s3.reason = '배포 후보 재실행 0건 — 배포본 사용을 증명하지 않음'; }
       else if (jr.status !== 'passed') { s3.status = 'failed'; s3.reason = `배포 후보 재실행 미통과: ${jr.reason}`; }
-      else { s3.status = 'passed'; s3.reason = `원본 테스트 ${rp.run.tests.length}개가 배포 후보 모듈 ${rp.redirected.length}개로 재실행되어 통과`; }
+      else { s3.status = 'passed'; s3.reason = `원본 테스트 ${rp.run.tests.length}개가 배포 후보 모듈 ${rp.redirected.length}개로 재실행되어 통과${run.realEnv ? `, 실제 브라우저(${run.realEnv.browsers.filter((b) => b.ok).map((b) => b.name).join(', ')}) 시나리오 ${run.realEnv.scenarios.length}개 일치` : ''}`; }
       this.touch(run);
       return run;
     }
