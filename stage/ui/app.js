@@ -275,7 +275,7 @@ function renderAnalysis(it) {
     ${!it.run ? `<div class="row gap confirm" style="margin:0 0 1rem"><button class="btn primary" id="enqueue" ${canRun ? '' : 'disabled'}>실행 큐에 적재 (1→2→3단계)</button>
     <span class="muted small">${canRun ? '자동 실행 가능 시나리오만 2단계에서 실행되고, 나머지는 미실행으로 표시됩니다.' : '프로젝트에 연결되지 않은 파일은 실행할 수 없습니다.'}</span></div>` : ''}
     <div class="small">${linkBadge} <code>${esc(a.input.fileName)}</code> sha256 <code>${esc(a.input.sha256.slice(0, 16))}…</code> · ${esc(a.input.linkEvidence)} · 분석 규칙 <code>${esc(a.rulesVersion)}</code> · 분석 ID <code>${esc(a.id)}</code></div>
-    ${p ? `<div class="small">프로젝트 <b>${esc(p.name)}@${esc(p.version)}</b> · git ${esc(p.git?.commit?.slice(0, 10) ?? p.git?.error ?? '-')} ${p.git?.dirty ? badge('s-partial', '작업 트리 변경 있음') : ''} · 러너: ${esc(p.runner?.evidence)}<br>공개 entry: ${p.publicEntries.map((e) => `<code>${esc(e.specifier)}</code> — ${esc(e.evidence)}`).join('<br>')}</div>` : ''}
+    ${p ? `<div class="small">프로젝트 <b>${esc(p.name)}@${esc(p.version)}</b> · git ${esc(p.git?.commit?.slice(0, 10) ?? p.git?.error ?? '-')} ${p.git?.dirty ? badge('s-partial', '작업 트리 변경 있음') : ''} · 러너: ${esc(p.runner?.evidence)}${p.packageDirEvidence ? `<br>배포 단위: <code>${esc(p.packageDir)}</code> — ${esc(p.packageDirEvidence)}` : ''}<br>공개 entry: ${p.publicEntries.map((e) => `<code>${esc(e.specifier)}</code> — ${esc(e.evidence)}`).join('<br>')}</div>` : ''}
     ${a.stageConfig ? `<div class="small">스테이지 힌트: ${a.stageConfig.present ? `<code>stage.config.json</code> sha256 ${esc(a.stageConfig.sha256.slice(0, 12))}…` : '없음(컨슈머 초기화 경로 미연결)'}</div>` : ''}
     ${findingList(a.findings)}
     <h3>import</h3>
@@ -405,11 +405,17 @@ function renderOps(it) {
     $('#s3-locked').textContent = isTerminal(s2.status) ? `2단계가 통과하지 못해 3단계는 열리지 않습니다. (${s2.reason})` : '2단계를 통과하면 이 화면이 열립니다.';
     return;
   }
-  $('#env').innerHTML = `<span><b>실행 환경</b> Node ${esc(run.environment.node)} (${esc(run.environment.platform)}) 자식 프로세스</span><span><b>배포 후보</b> <code>${esc(run.candidate?.id)}</code></span>${a.script ? '' : `<span><b>Stage 대상</b> <code>${esc(run.environment.stageTarget ?? '설정 없음')}</code></span>`}<span><b>3단계</b> ${badge('s-' + s3.status, L('EXEC_LABEL', s3.status))} ${esc(s3.reason)}</span>`;
+  $('#env').innerHTML = `<span><b>실행 환경</b> Node ${esc(run.environment.node)} (${esc(run.environment.platform)}) 자식 프로세스</span><span><b>배포 후보</b> <code>${esc(run.candidate?.id)}</code></span>${a.script || run.replayMode ? '' : `<span><b>Stage 대상</b> <code>${esc(run.environment.stageTarget ?? '설정 없음')}</code></span>`}<span><b>3단계</b> ${badge('s-' + s3.status, L('EXEC_LABEL', s3.status))} ${esc(s3.reason)}</span>`;
   $('#complete3').disabled = !active;
   $('#complete3').onclick = async () => { try { await api('POST', `/api/runs/${run.id}/complete-stage3`); } catch (e) { alert(e.message); } };
   const sp = $('#script-panel');
-  $('#complete3-hint').textContent = a.script ? '배포 exports 런타임 import 검증의 최신 결과와 치환 잔여로 판정합니다. 확인 필요 항목은 사람이 확인해 기록합니다.' : 'Stage 모드 조작의 시나리오별 최신 결과로만 판정합니다. Mock 조작은 별도로 보고합니다.';
+  $('#complete3-hint').textContent = run.replayMode ? '원본 테스트를 배포 후보 파일로 재실행한 최신 결과로 판정합니다. 배포본이 한 번도 로드되지 않았거나 배포물에 없는 파일이 있으면 실패입니다.' : a.script ? '배포 exports 런타임 import 검증의 최신 결과와 치환 잔여로 판정합니다. 확인 필요 항목은 사람이 확인해 기록합니다.' : 'Stage 모드 조작의 시나리오별 최신 결과로만 판정합니다. Mock 조작은 별도로 보고합니다.';
+  if (run.replayMode) {
+    $('#wiring').replaceChildren(); $('#playground').replaceChildren(); $('#ops').replaceChildren();
+    renderReplayPanel(it, sp, active);
+    $('#manual-list').innerHTML = manualHtml(run);
+    return;
+  }
   if (a.script) {
     // 스크립트 SUT: 연결 구성·가상 화면·조작 카드 대신 스크립트 실행 결과와 exports 런타임 검증 화면을 보여준다.
     $('#wiring').replaceChildren(); $('#playground').replaceChildren(); $('#ops').replaceChildren();
@@ -494,6 +500,49 @@ function renderScriptPanel(it, host, active) {
   </div>`;
   host.querySelector('.sp-run').onclick = async (e) => { e.target.disabled = true; try { await api('POST', `/api/runs/${run.id}/exports-check`); } catch (err) { alert(err.message); } };
   for (const b of host.querySelectorAll('.sp-filter')) b.onclick = () => { st.filter = b.dataset.f; renderScriptPanel(it, host, active); };
+  for (const dEl of host.querySelectorAll('details[data-sec]')) dEl.addEventListener('toggle', () => { if (dEl.open) st.open.add(dEl.dataset.sec); else st.open.delete(dEl.dataset.sec); });
+}
+
+// ---- 배포 후보 재실행(런던파 등 조작 화면으로 옮길 수 없는 테스트): 원본 테스트를 배포본 파일로 다시 실행한 결과 ----
+const TEST_LABEL = { pass: ['s-pass', '통과'], fail: ['s-failed', '실패'], skip: ['s-not-applicable', 'skip'], todo: ['s-not-applicable', 'todo'] };
+function renderReplayPanel(it, host, active) {
+  const run = it.run;
+  const rp = run.replay;
+  const s1 = run.jobs.find((j) => j.kind === 'stage1')?.stage1;
+  const running = run.jobs.some((j) => j.kind === 'replay' && (j.status === 'queued' || j.status === 'running'));
+  if (!it.rp) it.rp = { open: new Set(['tests']), filter: 'all' };
+  const st = it.rp;
+  if (host.dataset.run !== run.id) { host.dataset.run = run.id; host.replaceChildren(); }
+  const tests = rp?.run.tests ?? [];
+  const nPass = tests.filter((t) => t.status === 'pass').length;
+  const nFail = tests.filter((t) => t.status === 'fail').length;
+  const lineOf = (t) => t.line;
+  const base = (t) => s1?.tests.find((x) => x.line === lineOf(t) && x.name === t.name) ?? s1?.tests.find((x) => x.name === t.name);
+  const card = (label, value, sub) => `<div class="metric"><div class="small muted">${esc(label)}</div><div class="mv">${esc(value)}</div><div class="small muted">${esc(sub ?? '')}</div></div>`;
+  const section = (id, title, body) => `<details class="job" data-sec="${id}" ${st.open.has(id) ? 'open' : ''}><summary>${title}</summary><div class="body">${body}</div></details>`;
+  const filterBtn = (k, label) => `<button class="sp-filter ${st.filter === k ? 'on' : ''}" data-f="${k}" type="button">${label}</button>`;
+  const shown = tests.filter((t) => st.filter === 'all' || t.status === st.filter);
+  const val = (v) => v === undefined ? '' : `<code>${esc(typeof v === 'string' ? v : JSON.stringify(v))}</code>`;
+  const rows = shown.map((t) => {
+    const b = base(t);
+    const regress = b && b.status === 'pass' && t.status !== 'pass';
+    const err = t.error ? `<div class="small" style="margin-top:.2rem"><span class="muted">오류</span> ${esc(t.error.message.split('\n')[0])}${t.error.operator ? `<br><span class="muted">기대</span> ${val(t.error.expected)} <span class="muted">실제</span> ${val(t.error.actual)}` : ''}</div>` : '';
+    return `<div class="exp-row"><div class="exp-h">${badge(...TEST_LABEL[t.status])}<span>${esc(t.name)}</span>${regress ? ` ${badge('s-failed', '원본은 통과 → 배포본에서 실패')}` : ''}</div>
+      <div class="exp-s small"><span class="muted">원본(1단계)</span> ${b ? badge(...TEST_LABEL[b.status]) : badge('s-not-applicable', '—')} <span class="muted">배포 후보</span> ${badge(...TEST_LABEL[t.status])} <span class="muted">${t.line ? `${esc(run.testFile.path)}:${t.line}` : ''}</span></div>${err}</div>`;
+  }).join('') || '<p class="muted small">해당하는 항목 없음</p>';
+  const modules = rp ? `<p class="small muted">원본 테스트가 import한 프로젝트 dist 파일이 아래 배포 후보 파일로 바뀌어 실행됐습니다(<code>${esc(rp.packageDir)}</code> 기준).</p>${rp.redirected.map((f) => `<div class="small"><code>${esc(f)}</code></div>`).join('') || '<p class="small muted">없음</p>'}${rp.missing.length ? `<p class="small">${badge('s-failed', '배포물에 없음')}</p>${rp.missing.map((f) => `<div class="small"><code>${esc(f)}</code></div>`).join('')}` : ''}` : '<p class="small muted">아직 실행하지 않았습니다.</p>';
+  const out = rp ? `<pre class="log">${esc(rp.run.output ?? '')}</pre>` : '';
+  host.innerHTML = `<div class="card">
+    <h4>배포 후보 재실행 <span class="muted small"><code>${esc(run.testFile.path)}</code></span></h4>
+    <p class="small muted">이 테스트는 협력자를 대체 객체로 바꿔 호출 인자를 검증하는 런던파 스타일이라 입력→출력 조작 화면으로 옮기지 않습니다. 대신 <b>원본 테스트를 수정 없이</b> 실행하되, 프로젝트 <code>dist</code> import만 소비자 샌드박스에 설치된 <b>배포 후보 파일</b>로 바꿔 같은 mock·assert를 그대로 적용합니다. peer 의존성(React 등)은 테스트 쪽 사본을 공유합니다.</p>
+    <div class="metrics">${card('통과', rp ? `${nPass}/${tests.length}` : '—', rp ? (nFail ? `실패 ${nFail}개` : '실패 없음') : '')}${card('배포 후보 모듈', rp ? `${rp.redirected.length}개` : '—', rp?.missing.length ? `배포물에 없는 파일 ${rp.missing.length}개` : '로드된 파일')}${card('원본(1단계)', s1 ? `${s1.tests.filter((t) => t.status === 'pass').length}/${s1.tests.length}` : '—', '프로젝트 dist 기준')}</div>
+    <div class="row gap" style="margin:.6rem 0"><button class="btn primary rp-run" type="button" ${active && !running ? '' : 'disabled'}>${running ? '재실행 중…' : rp ? '배포 후보로 다시 실행' : '배포 후보로 실행'}</button></div>
+    ${section('tests', `시나리오별 결과 <span class="muted small">${tests.length}개</span>`, `<div class="row gap wrap small" style="margin:.2rem 0"><span class="mode">${filterBtn('all', '전체')}${filterBtn('fail', '실패')}${filterBtn('pass', '통과')}</span></div>${rows}`)}
+    ${section('modules', `로드된 배포 후보 모듈 <span class="muted small">${rp ? rp.redirected.length + '개' : ''}</span>`, modules)}
+    ${section('out', '러너 출력', out || '<p class="small muted">아직 실행하지 않았습니다.</p>')}
+  </div>`;
+  host.querySelector('.rp-run').onclick = async (e) => { e.target.disabled = true; try { await api('POST', `/api/runs/${run.id}/replay`); } catch (err) { alert(err.message); } };
+  for (const b of host.querySelectorAll('.sp-filter')) b.onclick = () => { st.filter = b.dataset.f; renderReplayPanel(it, host, active); };
   for (const dEl of host.querySelectorAll('details[data-sec]')) dEl.addEventListener('toggle', () => { if (dEl.open) st.open.add(dEl.dataset.sec); else st.open.delete(dEl.dataset.sec); });
 }
 

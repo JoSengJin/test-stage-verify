@@ -301,6 +301,9 @@ export interface ProjectInfo {
   packageJsonSha256?: string;
   git?: { commit?: string; dirty?: boolean; error?: string };
   runner?: RunnerInfo;
+  /** 배포 단위 디렉터리(루트와 다를 때만: 예 dist). 없으면 프로젝트 루트. */
+  packageDir?: string;
+  packageDirEvidence?: string;
   publicEntries: { subpath: string; specifier: string; distFile?: string; sourceFile?: string; evidence: string }[];
 }
 

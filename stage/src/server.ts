@@ -203,6 +203,12 @@ export function createStageServer(o: ServerOptions) {
           const settled = await Promise.race([job, new Promise((r) => setTimeout(r, 50))]);
           return send(res, 202, settled ?? { accepted: true });
         }
+        if (req.method === 'POST' && parts[3] === 'replay') {
+          const job = rm.replay(id);
+          job.catch(() => {});
+          const settled = await Promise.race([job, new Promise((r) => setTimeout(r, 50))]);
+          return send(res, 202, settled ?? { accepted: true });
+        }
         if (req.method === 'POST' && parts[3] === 'complete-stage3') return send(res, 200, rm.completeStage3(id));
         if (req.method === 'POST' && parts[3] === 'manual') return send(res, 201, rm.addManual(id, await body(req)));
         if (req.method === 'GET' && parts[3] === 'report') {

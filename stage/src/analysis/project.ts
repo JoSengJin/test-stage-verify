@@ -108,10 +108,24 @@ export function projectInfo(root: string): ProjectInfo {
   const pkg = readJson(pkgFile);
   const configs = buildConfigs(root);
   const publicEntries: ProjectInfo['publicEntries'] = [];
-  for (const t of exportTargets(pkg)) {
-    const specifier = t.subpath === '.' ? pkg.name : `${pkg.name}/${t.subpath.replace(/^\.\//, '')}`;
+  // 루트 package.json에 exports·main이 없고 dist/package.json이 exports를 선언하면 dist를 배포 단위로 본다.
+  let packageDir: string | undefined;
+  let packageDirEvidence: string | undefined;
+  let entryPkg = pkg;
+  const distPkgFile = path.join(root, 'dist', 'package.json');
+  if (pkg.exports === undefined && !pkg.main && fs.existsSync(distPkgFile)) {
+    const distPkg = readJson(distPkgFile);
+    if (distPkg.exports !== undefined) {
+      packageDir = path.join(root, 'dist');
+      packageDirEvidence = '루트 package.json에 exports·main이 없어 dist/package.json의 exports를 공개 진입점으로 사용(dist를 배포 단위로 pack)';
+      entryPkg = { ...distPkg, name: distPkg.name ?? pkg.name, version: distPkg.version ?? pkg.version };
+    }
+  }
+  const baseDir = packageDir ?? root;
+  for (const t of exportTargets(entryPkg)) {
+    const specifier = t.subpath === '.' ? entryPkg.name : `${entryPkg.name}/${t.subpath.replace(/^\.\//, '')}`;
     if (!t.js) { publicEntries.push({ subpath: t.subpath, specifier, evidence: 'exports에 실행 가능한 조건(import/default)이 없음' }); continue; }
-    const dist = path.resolve(root, t.js);
+    const dist = path.resolve(baseDir, t.js);
     let sourceFile: string | undefined;
     let evidence = `exports["${t.subpath}"] → ${t.js}: 대응 소스를 찾지 못함(outDir/rootDir를 가진 tsconfig 없음 또는 파일 없음)`;
     for (const c of configs) {
@@ -134,8 +148,10 @@ export function projectInfo(root: string): ProjectInfo {
   }
   return {
     root,
-    name: pkg.name,
-    version: pkg.version,
+    name: entryPkg.name,
+    version: entryPkg.version,
+    packageDir,
+    packageDirEvidence,
     packageJsonSha256: sha256(fs.readFileSync(pkgFile)),
     git: gitInfo(root),
     runner: detectRunner(pkg),

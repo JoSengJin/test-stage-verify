@@ -30,7 +30,7 @@ function importsNodeTest(file: string): boolean {
   try { return /from\s+['"](?:node:)?test['"]|require\(\s*['"](?:node:)?test['"]\s*\)|import\s+['"]node:test['"]/.test(fs.readFileSync(file, 'utf8')); } catch { return false; }
 }
 
-export async function runStage1(opts: { projectRoot: string; testFile: string; runner?: RunnerInfo; outDir: string; signal: AbortSignal; timeoutMs: number }): Promise<Stage1Result> {
+export async function runStage1(opts: { projectRoot: string; testFile: string; runner?: RunnerInfo; outDir: string; signal: AbortSignal; timeoutMs: number; extraNodeArgs?: string[]; extraEnv?: Record<string, string>; eventsName?: string }): Promise<Stage1Result> {
   let { runner } = opts;
   // scripts.test가 래퍼(예: 워크스페이스 위임)라 인식되지 않아도, 테스트 파일이 node:test를 직접 import하면 node --test로 단독 실행한다.
   if ((!runner || runner.kind !== 'node-test') && importsNodeTest(opts.testFile)) {
@@ -40,12 +40,12 @@ export async function runStage1(opts: { projectRoot: string; testFile: string; r
     return { status: 'failed', reason: `사용 가능한 러너 인식기 없음: ${runner?.evidence ?? '러너 정보 없음'} — 1단계를 실행하지 않았으며 통과로 처리하지 않음`, command: '', exitCode: null, tests: [], output: '' };
   }
   fs.mkdirSync(opts.outDir, { recursive: true });
-  const events = path.join(opts.outDir, 'stage1-events.ndjson');
+  const events = path.join(opts.outDir, opts.eventsName ?? 'stage1-events.ndjson');
   const rel = path.relative(opts.projectRoot, opts.testFile);
-  const args = [...runner.flags, '--test', `--test-reporter=${REPORTER}`, `--test-reporter-destination=${events}`, '--test-reporter=spec', '--test-reporter-destination=stdout', rel];
+  const args = [...(opts.extraNodeArgs ?? []), ...runner.flags, '--test', `--test-reporter=${REPORTER}`, `--test-reporter-destination=${events}`, '--test-reporter=spec', '--test-reporter-destination=stdout', rel];
   const command = `node ${args.join(' ')}`;
   // 상위 프로세스가 node --test 아래에서 돌 때 상속되는 NODE_TEST_CONTEXT를 제거해야 원본 러너가 독립 실행된다.
-  const env = { ...process.env };
+  const env = { ...process.env, ...(opts.extraEnv ?? {}) };
   delete env.NODE_TEST_CONTEXT;
   const r = await runProc(process.execPath, args, { cwd: opts.projectRoot, env, signal: opts.signal, timeoutMs: opts.timeoutMs });
   const output = (r.stdout + (r.stderr ? `\n[stderr]\n${r.stderr}` : '')).slice(-20000);

@@ -12,13 +12,14 @@ import { checkCandidateContract, prepareCandidate, type CandidateContract, type 
 import { runStage1, type Stage1Result } from './stage1.ts';
 import { runScriptSandbox } from './script-run.ts';
 import { verifyExports } from './exports-verify.ts';
+import { runReplay, type ReplayResult } from './replay.ts';
 import type { ChildJob, MockRoute } from './child.ts';
 import { newId, redactText, sha256 } from '../util.ts';
 import type { Store } from '../store.ts';
 
 const CHILD = path.join(path.dirname(fileURLToPath(import.meta.url)), 'child.ts');
 
-export type JobKind = 'stage1' | 'candidate' | 'contract' | 'scenario' | 'variant' | 'interaction' | 'script' | 'exports';
+export type JobKind = 'stage1' | 'candidate' | 'contract' | 'scenario' | 'variant' | 'interaction' | 'script' | 'exports' | 'replay';
 
 export interface Job {
   id: string;
@@ -39,6 +40,7 @@ export interface Job {
   input?: InteractionInput;
   outcome?: ExecOutcome;
   stage1?: Stage1Result;
+  replay?: ReplayResult;
   logs: string[];
 }
 
@@ -90,6 +92,9 @@ export interface Run {
   /** 스크립트 SUT: 샌드박스 실행 결과와 exports 런타임 import 검증 결과 */
   script?: ScriptRunResult;
   exportsCheck?: ExportsCheck;
+  /** 배포 후보 재실행 모드: 조작 화면으로 옮길 수 없는 테스트(런던파 등)를 원본 그대로 배포본에 대해 다시 실행한다. */
+  replayMode?: boolean;
+  replay?: ReplayResult;
   stages: StageState[];
   jobs: Job[];
   manual: ManualCheck[];
@@ -107,7 +112,7 @@ export interface RunManagerOptions {
   onChange?: (run: Run) => void;
 }
 
-const DEFAULT_TIMEOUTS: Record<JobKind, number> = { stage1: 60_000, candidate: 240_000, contract: 60_000, scenario: 15_000, variant: 15_000, interaction: 20_000, script: 120_000, exports: 240_000 };
+const DEFAULT_TIMEOUTS: Record<JobKind, number> = { stage1: 60_000, candidate: 240_000, contract: 60_000, scenario: 15_000, variant: 15_000, interaction: 20_000, script: 120_000, exports: 240_000, replay: 120_000 };
 
 export class RunManager {
   runs = new Map<string, Run>();
@@ -294,6 +299,9 @@ export class RunManager {
     // 스크립트 SUT(빌드 스크립트 등)는 공개 API 시나리오가 아니라 샌드박스 실행 → 배포 exports 런타임 import 검증 경로를 탄다.
     if (a.script) return this.scriptPipeline(run, a, { startStage, endStage, skipRest });
 
+    // 조작 화면으로 옮길 시나리오가 하나도 없고 배포 단위가 있으면: 원본 테스트를 배포 후보에 대해 그대로 재실행한다.
+    if (this.replayEligible(a)) return this.replayPipeline(run, a, { startStage, endStage, skipRest });
+
     // 2단계 (STAGE_SKIP_STAGE2=1이면 건너뛰고 프로젝트의 공개 진입 파일을 직접 import해 3단계로 간다)
     const cfg = this.stageConfig(root);
     if (this.env.STAGE_SKIP_STAGE2 === '1') {
@@ -315,7 +323,7 @@ export class RunManager {
     }
     startStage(s2, '배포 후보 준비');
     const jc = await this.enqueue(run, { stage: 2, kind: 'candidate', label: '배포 후보 생성(npm pack)·컨슈머 샌드박스 설치' }, async (job, signal) => {
-      run.candidate = await prepareCandidate(root, this.sandboxRoot, (m) => { job.logs.push(m); this.touch(run); }, signal);
+      run.candidate = await prepareCandidate(a.project?.packageDir ?? root, this.sandboxRoot, (m) => { job.logs.push(m); this.touch(run); }, signal);
       job.logs.push(`배포 후보: ${run.candidate.id}, sha256=${run.candidate.tarballSha256}`);
       job.status = 'passed';
       job.reason = `${run.candidate.id} 설치 완료`;
@@ -396,6 +404,59 @@ export class RunManager {
     s3.status = 'preparing';
     s3.reason = '사용자 확인 대기 — 배포 exports 런타임 import 검증을 실행하세요';
     this.touch(run);
+  }
+
+
+  /** 조작 화면이 될 시나리오가 없고(전부 미지원/대상 없음), 프로젝트가 배포 단위의 진입 파일을 가진 경우. */
+  replayEligible(a: AnalysisResult): boolean {
+    return a.scenarios.length > 0 && !a.scenarios.some((s) => s.support.status === 'auto') && !!a.project?.publicEntries.some((e) => e.distFile);
+  }
+
+  /** 배포 후보 재실행: 2단계 = 배포 후보 pack·설치, 3단계 = 원본 테스트를 배포 후보 파일로 다시 실행. */
+  private async replayPipeline(run: Run, a: AnalysisResult, h: { startStage: (s: StageState, r: string) => void; endStage: (s: StageState, st: ExecStatus, r: string) => void; skipRest: (from: StageState[], why: string) => void }) {
+    const [, s2, s3] = run.stages;
+    const root = run.project.root;
+    run.replayMode = true;
+    h.startStage(s2, '배포 후보 준비');
+    const jc = await this.enqueue(run, { stage: 2, kind: 'candidate', label: '배포 후보 생성(npm pack)·컨슈머 샌드박스 설치' }, async (job, signal) => {
+      run.candidate = await prepareCandidate(a.project?.packageDir ?? root, this.sandboxRoot, (m) => { job.logs.push(m); this.touch(run); }, signal);
+      job.logs.push(`배포 후보: ${run.candidate.id}, sha256=${run.candidate.tarballSha256}`);
+      job.status = 'passed';
+      job.reason = `${run.candidate.id} 설치 완료`;
+    });
+    if (run.cancelled) return;
+    if (jc.status !== 'passed' || !run.candidate) { h.endStage(s2, jc.status === 'passed' ? 'failed' : jc.status, `배포 후보 준비 실패: ${jc.reason}`); h.skipRest([s3], '2단계가 성공하지 않아 미실행'); return; }
+    h.endStage(s2, 'passed', `배포 후보 설치 완료 (${run.candidate.id}) — 조작 화면으로 옮길 시나리오가 없어 3단계에서 원본 테스트를 배포본으로 재실행`);
+    s3.status = 'preparing';
+    s3.reason = '배포 후보 재실행 준비';
+    this.touch(run);
+    await this.replay(run.id).catch(() => undefined);
+  }
+
+  /** 3단계(재실행 모드): 원본 테스트를 배포 후보 파일로 다시 실행한다. 여러 번 다시 실행할 수 있다. */
+  async replay(runId: string): Promise<Job> {
+    const run = this.runs.get(runId);
+    if (!run) throw new HttpError(404, '실행 없음');
+    if (run.cancelled) throw new HttpError(409, '취소된 실행');
+    const s3 = run.stages[2];
+    if (!run.replayMode || !run.candidate) throw new HttpError(409, '이 실행은 배포 후보 재실행 모드가 아님');
+    if (s3.status !== 'preparing' && s3.status !== 'running') throw new HttpError(409, `3단계를 진행할 수 없음: ${s3.reason}`);
+    const a = this.analyses.get(run.analysisId)!;
+    const cand = run.candidate;
+    const from = a.project?.packageDir ?? run.project.root;
+    if (s3.status === 'preparing') { s3.status = 'running'; s3.startedAt = new Date().toISOString(); }
+    s3.reason = '원본 테스트를 배포 후보로 재실행 중';
+    this.touch(run);
+    return this.enqueue(run, { stage: 3, kind: 'replay', label: `원본 테스트를 배포 후보로 재실행: ${run.testFile.path}` }, async (job, signal) => {
+      const r = await runReplay({ projectRoot: run.project.root, testFile: path.join(run.project.root, run.testFile.path), runner: a.project?.runner, fromDir: from, candidate: cand, outDir: this.store.runDir(run.id), signal, timeoutMs: job.timeoutMs - 5000 });
+      run.replay = r;
+      job.replay = r;
+      const nPass = r.run.tests.filter((t) => t.status === 'pass').length;
+      if (r.missing.length) { job.status = 'failed'; job.reason = `배포물에 없는 파일 ${r.missing.length}개: ${r.missing.slice(0, 3).join(', ')}`; }
+      else if (r.redirected.length === 0) { job.status = 'failed'; job.reason = '배포 후보 파일이 한 번도 로드되지 않음 — 테스트가 배포 단위를 import하지 않아 검증이 성립하지 않음'; }
+      else { job.status = r.run.status; job.reason = `배포 후보 모듈 ${r.redirected.length}개 로드 · 테스트 ${nPass}/${r.run.tests.length}개 통과${r.run.status === 'passed' ? '' : ` — ${r.run.reason}`}`; }
+      if (run.stages[2].status === 'running') run.stages[2].reason = `재실행 완료(${job.reason}) — 결과를 확인하고 3단계 판정을 확정하세요`;
+    });
   }
 
   /** 배포 패키지가 선언한 peer 의존성 중 프로젝트(개발 환경)가 쓰는 정확한 버전을 소비자 샌드박스에도 설치한다. */
@@ -569,6 +630,16 @@ export class RunManager {
     const s3 = run.stages[2];
     if (s3.status !== 'running' && s3.status !== 'preparing') throw new HttpError(409, `3단계 상태가 ${s3.status}`);
     if (this.queue.some((p) => p.job.runId === runId) || run.jobs.some((j) => this.running.has(j.id))) throw new HttpError(409, '진행 중인 작업이 있음');
+    if (run.replayMode) {
+      const rp = run.replay;
+      s3.endedAt = new Date().toISOString();
+      const jr = [...run.jobs].reverse().find((j) => j.kind === 'replay');
+      if (!rp || !jr) { s3.status = 'failed'; s3.reason = '배포 후보 재실행 0건 — 배포본 사용을 증명하지 않음'; }
+      else if (jr.status !== 'passed') { s3.status = 'failed'; s3.reason = `배포 후보 재실행 미통과: ${jr.reason}`; }
+      else { s3.status = 'passed'; s3.reason = `원본 테스트 ${rp.run.tests.length}개가 배포 후보 모듈 ${rp.redirected.length}개로 재실행되어 통과`; }
+      this.touch(run);
+      return run;
+    }
     if (run.script) {
       const ec = run.exportsCheck;
       s3.endedAt = new Date().toISOString();
