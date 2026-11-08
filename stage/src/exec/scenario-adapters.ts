@@ -1,6 +1,7 @@
 import ts from 'typescript';
 import { testLiteral } from './scenario-presentation.ts';
 import { testApi } from './test-api.ts';
+import { calculationHelper } from './scenario-helpers.ts';
 
 export interface ScenarioEdit { start: number; end: number; text: string }
 export interface ScenarioNetwork { kind: 'http' | 'sse'; valueKey: string; response?: unknown; failure?: boolean; method?: string; path?: string; envelope?: string[] }
@@ -60,6 +61,7 @@ export function adaptScenario(body: ts.Block, sf: ts.SourceFile, constants: read
   const roles: Record<string, string> = {};
   const kinds: Record<string, 'object' | 'function' | 'value'> = {};
   const notes: string[] = [];
+  const calculations = new Map<string, string>();
   const bindings = new Map<string, unknown>();
   const dynamic = new Map<string, string>();
   let network: ScenarioNetwork | undefined;
@@ -76,8 +78,17 @@ export function adaptScenario(body: ts.Block, sf: ts.SourceFile, constants: read
   const helperInfo = (helper: ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression) => {
     const methods: string[] = [];
     const globals = new Set<string>();
+    const mockObjects = new Set<string>();
+    let returnedProperty: string | undefined;
     const scan = (node: ts.Node) => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && ts.isObjectLiteralExpression(node.initializer) && node.initializer.properties.some(property => ts.isPropertyAssignment(property) && ts.isCallExpression(property.initializer) && api.canonical(property.initializer.expression) === 'mock.fn')) mockObjects.add(node.name.text);
       if (ts.isPropertyAssignment(node) && ts.isCallExpression(node.initializer) && api.canonical(node.initializer.expression) === 'mock.fn') methods.push(ts.isStringLiteralLike(node.name) ? node.name.text : node.name.getText(sf));
+      if (ts.isReturnStatement(node) && node.expression && ts.isObjectLiteralExpression(node.expression)) {
+        for (const property of node.expression.properties) {
+          const value = ts.isShorthandPropertyAssignment(property) ? property.name : ts.isPropertyAssignment(property) ? property.initializer : undefined;
+          if (value && ts.isIdentifier(value) && mockObjects.has(value.text) && property.name) returnedProperty = ts.isStringLiteralLike(property.name) ? property.name.text : property.name.getText(sf);
+        }
+      }
       if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
         if (['globalThis.window', 'global.window'].includes(node.left.getText(sf)) && ts.isObjectLiteralExpression(node.right)) {
           for (const property of node.right.properties) if (property.name) globals.add(ts.isStringLiteralLike(property.name) ? property.name.text : property.name.getText(sf));
@@ -88,7 +99,7 @@ export function adaptScenario(body: ts.Block, sf: ts.SourceFile, constants: read
     };
     scan(helper);
     const role = globals.has('EventSource') ? 'event-source' : globals.has('sessionStorage') ? 'session-storage' : globals.has('localStorage') ? 'local-storage' : methods.includes('safeParse') ? 'schema' : methods.includes('useEffect') && methods.includes('useRef') ? 'react' : methods.includes('info') ? 'logger' : 'object';
-    return { role, methods };
+    return { role, methods, returnedProperty };
   };
   for (const constant of constants) {
     const parsed = testLiteral(constant.initializer, bindings);
@@ -183,6 +194,12 @@ export function adaptScenario(body: ts.Block, sf: ts.SourceFile, constants: read
       }
       if (helpers.has(name)) {
         const info = helperInfo(helpers.get(name)!);
+        if (info.role === 'object' && !info.methods.length) {
+          const calculation = calculationHelper(name, helpers.get(name)!, sf);
+          calculations.set(name, calculation.code);
+          if (calculation.asynchronous) edit(node, `(await ${node.getText(sf)})`);
+          return;
+        }
         const key = info.role === 'react' ? 'react' : info.role === 'event-source' ? 'eventSource' : ts.isVariableDeclaration(node.parent) ? node.parent.name.getText(sf) : name;
         if (info.role === 'event-source') {
           eventSource = true;
@@ -192,7 +209,8 @@ export function adaptScenario(body: ts.Block, sf: ts.SourceFile, constants: read
           notes.push('직접 호출하던 가짜 이벤트를 실제 EventSource 연결·서버 메시지 수신으로 재현합니다.');
         } else {
           const expression = connection(key, info.role, 'object');
-          edit(node, ts.isExpressionStatement(node.parent) ? expression : `observeObject(${expression}, ${JSON.stringify(info.methods)})`);
+          const observed = `observeObject(${expression}, ${JSON.stringify(info.methods)})`;
+          edit(node, ts.isExpressionStatement(node.parent) ? expression : info.returnedProperty ? `({ ${JSON.stringify(info.returnedProperty)}: ${observed} })` : observed);
           if (info.role === 'session-storage' && node.arguments.length) notes.push('실제 Storage의 없는 키는 null을 반환합니다. mock의 undefined 반환 분기는 실제 Storage에서 재현되지 않습니다.');
         }
         return;
@@ -218,6 +236,7 @@ export function adaptScenario(body: ts.Block, sf: ts.SourceFile, constants: read
     ts.forEachChild(node, walk);
   };
   walk(body);
+  if (calculations.size) edits.push({ start: body.getStart(sf) + 1, end: body.getStart(sf) + 1, text: [...calculations.values()].join('\n') + '\n' });
   // Expectations based on fixed time/random values must follow the actual collaborator's recorded result.
   if (dynamic.size) {
     const expand = (node: ts.Node, seen = new Set<string>()): { text: string; changed: boolean } => {

@@ -86,7 +86,7 @@ export function connectedScenarios(testFile: string, fromDir: string, moduleRoot
     ts.forEachChild(node, visit);
   };
   visit(sf);
-  return { scenarios, symbols, sourceHash: createHash('sha256').update(source).digest('hex'), presentationVersion: 7 };
+  return { scenarios, symbols, sourceHash: createHash('sha256').update(source).digest('hex'), presentationVersion: 8 };
 }
 
 export async function runConnectedNode(opts: { dir: string; console: LiveConsole; scenario: ReturnType<typeof connectedScenarios>; input: unknown; signal: AbortSignal }) {

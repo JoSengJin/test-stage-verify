@@ -239,7 +239,7 @@ export function createStageServer(o: ServerOptions) {
         if (req.method === 'GET' && parts[3] === 'live-console') {
           const live = run.realEnv?.live;
           if (!live?.console) throw new HttpError(404, '직접 호출할 배포 후보 모듈 없음');
-          if (run.connected && run.connected.definition.presentationVersion !== 7) {
+          if (run.connected && run.connected.definition.presentationVersion !== 8) {
             const testFile = path.join(run.project.root, run.testFile.path);
             if (sha256(fs.readFileSync(testFile)) !== run.connected.definition.sourceHash) throw new HttpError(409, '테스트 파일이 변경되었습니다. 배포 후보를 다시 실행하세요.');
             const fromDir = rm.analyses.get(run.analysisId)?.project?.packageDir ?? run.project.root;
