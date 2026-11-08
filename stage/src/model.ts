@@ -189,6 +189,9 @@ export interface WiringCall {
   /** 테스트가 호출한 공개 API 이름 */
   sut: string;
   specifier: string;
+  /** Verified from the implementation's React imports. */
+  hook?: boolean;
+  clientFactory?: { specifier: string; exportName: string };
   /** 첫 인자가 문자열 리터럴이면 그 값 (예: 요청 경로) */
   path?: string;
   options: WiringOption[];

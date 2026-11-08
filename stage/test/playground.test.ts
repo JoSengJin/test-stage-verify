@@ -14,6 +14,7 @@ import { SAMPLE } from './helpers.ts';
 const loc = { file: 't', line: 1, column: 1 };
 const call: WiringCall = {
   id: 'wt1.c1', sut: 'useApiManualCall', specifier: 'base-framework/lib/http/react', path: '/orders', loc,
+  hook: true, clientFactory: {specifier:'custom-sdk/transport',exportName:'buildClient'},
   options: [
     { key: 'client', kind: 'double', source: 'client' },
     { key: 'method', kind: 'literal', value: 'POST', source: "'POST'" },
@@ -32,11 +33,13 @@ describe('가상 화면 코드 생성', () => {
 
   it('Hook만 가상 화면 대상이고 클래스는 아니다', () => {
     assert.equal(isPlayable(call), true);
-    assert.equal(isPlayable({ sut: 'OrderService' }), false);
+    assert.equal(isPlayable({ hook: false }), false);
   });
 
   it('실제 클라이언트를 프록시 주소로 만들고 공개 API를 import한다', () => {
     // 실제 클라이언트는 앞이 /인 경로의 baseUrl 경로를 버리므로 세션은 경로가 아니라 헤더로 식별한다.
+    assert.match(src, /import \{ buildClient as createStageClient \} from \"custom-sdk\/transport\"/);
+    assert.doesNotMatch(src, /base-framework\/lib\/http';/);
     assert.match(src, /baseUrl: window\.__STAGE_ORIGIN__ \|\| location\.origin,/);
     assert.match(src, /defaultHeaders: \{ 'x-stage-session': "abc" \}/);
     assert.match(src, /import \{ useApiManualCall \} from 'base-framework\/lib\/http\/react'/);

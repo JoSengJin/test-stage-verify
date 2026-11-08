@@ -1,0 +1,7 @@
+{
+  "name": "@verification/stockroom",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": { ".": { "types": "./index.d.ts", "default": "./index.js" } },
+  "files": ["index.js", "index.d.ts"]
+}

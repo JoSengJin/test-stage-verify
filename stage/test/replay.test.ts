@@ -7,6 +7,7 @@ import path from 'node:path';
 import { RunManager } from '../src/exec/runs.ts';
 import { Store } from '../src/store.ts';
 import { analyzeTestFile } from '../src/analysis/analyze.ts';
+import { runConnectedNode } from '../src/exec/connected-scenarios.ts';
 
 const SANDBOX = path.join(os.tmpdir(), 'stage-framework-test-candidates');
 
@@ -49,6 +50,18 @@ describe('배포 후보 재실행', () => {
     assert.deepEqual(run.replay!.redirected, ['index.js']);
     assert.equal(run.replay!.run.tests.length, 1);
     assert.match(run.replay!.packageDir, /node_modules\/replay-fixture$/);
+    assert.throws(() => rm.completeStage3(run.id), /실제 협력자 기대 결과 미검증/);
+    const configured = run.connected!;
+    const input = { code: configured.definition.scenarios[0].code, connections: { log: 'console.log.bind(console)' }, values: {}, environment: 'node', seed: {} };
+    const result = await runConnectedNode({ dir: run.realEnv!.live!.dir, console: run.realEnv!.live!.console!, scenario: configured.definition, input, signal: new AbortController().signal });
+    assert.equal(result.status, 'passed', result.reason);
+    const data = { jobId: configured.jobId, scenarioId: '0', sequence: 1, type: 'result', input, result };
+    rm.recordConnected(run.id, data);
+    rm.recordConnected(run.id, { ...data, type: 'invalidate', sequence: 2 });
+    rm.recordConnected(run.id, data); // An older response cannot restore an invalidated pass.
+    assert.throws(() => rm.completeStage3(run.id), /미검증/);
+    rm.recordConnected(run.id, { ...data, sequence: 3 });
+    assert.throws(() => rm.recordConnected(run.id, { ...data, jobId: 'old-job', sequence: 4 }), /유효한/);
     rm.completeStage3(run.id);
     assert.equal(run.stages[2].status, 'passed');
     fs.rmSync(root, { recursive: true, force: true });

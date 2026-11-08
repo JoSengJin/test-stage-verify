@@ -45,7 +45,7 @@ function supervise() {
     const src = path.dirname(SELF).replace(/[/\\]src$/, '') + path.sep + 'src';
     let timer: NodeJS.Timeout | undefined;
     fs.watch(path.join(path.dirname(SELF), '..', 'src'), { recursive: true }, (_ev, file) => {
-      if (!file || !/\.(ts|mjs)$/.test(String(file))) return;
+      if (!file || !/\.(ts|mjs|js)$/.test(String(file))) return;
       clearTimeout(timer);
       timer = setTimeout(() => restart(`코드 변경 감지: ${file}`), 300);
     });

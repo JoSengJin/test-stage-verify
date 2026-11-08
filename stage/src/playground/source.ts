@@ -2,8 +2,8 @@
 // 작은 React 화면 코드를 만든다. 사용자는 이 코드를 화면에서 고치며 동작을 확인한다.
 import type { Value, WiringCall, WiringOption } from '../model.ts';
 
-/** Hook(use로 시작하는 공개 API)만 가상 화면으로 만들 수 있다. */
-export const isPlayable = (call: Pick<WiringCall, 'sut'>) => /^use[A-Z]/.test(call.sut);
+/** This template requires a verified React implementation and HTTP client factory. */
+export const isPlayable = (call: Pick<WiringCall, 'hook' | 'clientFactory'>) => call.hook === true && !!call.clientFactory;
 
 function lit(v: Value, indent = 2): string {
   if (v && typeof v === 'object' && !Array.isArray(v) && (v as any).$stage === 'undefined') return 'undefined';
@@ -43,6 +43,8 @@ export interface SourceInput {
 }
 
 export function generateHookSource({ call, testTitle, sessionId }: SourceInput): string {
+  if (!call.clientFactory) throw new Error('프로젝트 공개 export에서 검증된 HTTP 클라이언트 생성기를 찾지 못했습니다.');
+  const factoryName = /^[A-Za-z_$][\w$]*$/.test(call.clientFactory.exportName) ? call.clientFactory.exportName : JSON.stringify(call.clientFactory.exportName);
   const hasClient = call.collaborators.some((k) => k.option === 'client');
   const pathArg = call.path !== undefined ? JSON.stringify(call.path) : 'undefined';
   const lines = call.options.map(optionLine).map((l) => `    ${l}`);
@@ -54,7 +56,7 @@ export function generateHookSource({ call, testTitle, sessionId }: SourceInput):
 // 선택한 연결 프로필의 서버로 나갑니다. 코드를 고치면 오른쪽 화면에 바로 반영됩니다.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { createApiClient } from 'base-framework/lib/http';
+import { ${factoryName} as createStageClient } from ${JSON.stringify(call.clientFactory.specifier)};
 import { ${call.sut} } from '${call.specifier}';
 
 const report = (kind, name, detail) => window.parent.postMessage({ stage: true, kind, name, detail, at: Date.now() }, '*');
@@ -63,7 +65,7 @@ const plain = (v) => {
 };
 const spy = (name) => (...args) => { report('callback', name, plain(args)); };
 
-const client = createApiClient({
+const client = createStageClient({
   baseUrl: window.__STAGE_ORIGIN__ || location.origin,
   defaultHeaders: { 'x-stage-session': ${JSON.stringify(sessionId)} },
 });

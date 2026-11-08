@@ -14,6 +14,7 @@ import { awaitedReturn, toSchema } from './schema.ts';
 import { extractWiring } from './wiring.ts';
 import { detectScriptTarget } from './script.ts';
 import { newId, sha256 } from '../util.ts';
+import { wireModuleContracts } from '../exec/module-contracts.ts';
 
 // ---- 인식 규칙 표 (규칙 확장 지점) ----
 const NODE_TEST = new Set(['node:test', 'test']);
@@ -182,6 +183,7 @@ class Analyzer {
     if (scenarios.length === 0) this.findings.push({ ruleId: 'test/none', level: 'no-target', message: '인식한 테스트 케이스가 없음(node:test의 test/it 호출 없음)' });
     result.status = aggregate([...scenarios.map((s) => s.support.status)], this.findings);
     result.wiring = extractWiring(this.sf, result.imports, (f) => this.rel(f));
+    wireModuleContracts(result.project, this.sf.fileName, result.wiring?.tests.flatMap(test => test.calls) ?? []);
     result.script = detectScriptTarget(this.sf, this.sf.fileName, this.root);
   }
 
