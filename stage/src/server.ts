@@ -9,10 +9,16 @@ import { HttpError, RunManager } from './exec/runs.ts';
 import { buildReport, reportHtml } from './report.ts';
 import { Store } from './store.ts';
 import { checkTarget, normalizeProfileDoc } from './profiles.ts';
+import { buildLiveConsole, liveConsoleHtml, liveFrameHtml } from './exec/real-env.ts';
+import { exportStage3Component } from './exec/code-export.ts';
+import { connectedScenarios, connectedConsoleHtml, runConnectedNode } from './exec/connected-scenarios.ts';
+import { ScenarioTargets } from './exec/scenario-targets.ts';
+import { wireModuleContracts } from './exec/module-contracts.ts';
 import { CORS, PlaygroundManager, frameHtml } from './playground/manager.ts';
 import { generateHookSource, isPlayable } from './playground/source.ts';
-import { EXEC_LABEL, LINK_LABEL, MODE_LABEL, RULES_VERSION, SUPPORT_LABEL, FRAMEWORK_VERSION } from './model.ts';
+import { EXEC_LABEL, LINK_LABEL, MODE_LABEL, RULES_VERSION, SUPPORT_LABEL, FRAMEWORK_VERSION, type AnalysisResult } from './model.ts';
 import { sha256 } from './util.ts';
+import { hostAllowed, isSafeConnectionExpression, originAllowed } from './gate.ts';
 
 const UI_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui');
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
@@ -28,6 +34,7 @@ export function createStageServer(o: ServerOptions) {
   const store = new Store(o.dataDir);
   const pg = new PlaygroundManager(o.env ?? process.env);
   const clients = new Set<http.ServerResponse>();
+  const targets = new ScenarioTargets();
   const rm = new RunManager({
     store, env: o.env, concurrency: o.concurrency,
     onChange: (run) => { const msg = `event: run\ndata: ${JSON.stringify(run)}\n\n`; for (const c of clients) c.write(msg); },
@@ -36,6 +43,11 @@ export function createStageServer(o: ServerOptions) {
   const projects: string[] = [];
   for (const p of [...o.projects, ...store.loadProjects()]) { const r = path.resolve(p); if (!projects.includes(r)) projects.push(r); }
   const persist = () => store.saveProjects(projects);
+  const upgradeAnalysis = (analysis: AnalysisResult | undefined) => {
+    const calls = analysis?.wiring?.tests.flatMap(test => test.calls) ?? [];
+    if (analysis?.project && calls.some(call => call.hook === undefined)) wireModuleContracts(analysis.project, path.join(analysis.project.root, analysis.input.linkedPath || analysis.input.fileName), calls);
+    return analysis;
+  };
 
   function linkDrop(fileName: string, content: string) {
     const sha = sha256(content);
@@ -60,10 +72,15 @@ export function createStageServer(o: ServerOptions) {
     res.end(JSON.stringify(data));
   };
 
+  // 판정·실행 API 보호: 허용된 Host(DNS rebinding 방어)와, 상태 변경 요청의 허용된 Origin(교차 출처 위조 방어)만 받는다.
+  const extraHosts = String((o.env ?? process.env).STAGE_ALLOWED_HOSTS ?? '').split(',');
+  const liveBundles = new Map<string, string>();
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const parts = url.pathname.split('/').filter(Boolean);
     try {
+      if (!hostAllowed(req.headers.host, extraHosts)) throw new HttpError(403, '허용되지 않은 Host입니다. localhost로 접속하거나 STAGE_ALLOWED_HOSTS에 등록하세요.');
+      if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS' && typeof req.headers['x-stage-session'] !== 'string' && !originAllowed(req.headers.origin, extraHosts)) throw new HttpError(403, '허용되지 않은 Origin의 상태 변경 요청입니다.');
       // 가상 화면의 실제 호출 프록시: 세션 헤더가 있는 요청은 경로·메서드와 관계없이(스테이지 자신의 경로와 같아도) 프록시가 받는다.
       const pgSession = req.headers['x-stage-session'];
       if (typeof pgSession === 'string') return await pg.proxy(req, res, pgSession, req.url ?? '/');
@@ -122,8 +139,9 @@ export function createStageServer(o: ServerOptions) {
         let source: string | undefined;
         let playable = false;
         if (b.analysisId) {
-          const call = rm.analyses.get(String(b.analysisId))?.wiring?.tests.find((t) => t.id === b.testId)?.calls.find((c) => c.id === b.callId);
-          const test = rm.analyses.get(String(b.analysisId))?.wiring?.tests.find((t) => t.id === b.testId);
+          const analysis = upgradeAnalysis(rm.analyses.get(String(b.analysisId)));
+          const test = analysis?.wiring?.tests.find((t) => t.id === b.testId);
+          const call = test?.calls.find((c) => c.id === b.callId);
           if (!call || !test) throw new HttpError(404, '호출 지점 없음');
           playable = isPlayable(call);
           if (playable) source = generateHookSource({ call, testTitle: test.path.join(' › '), sessionId: s.id });
@@ -171,7 +189,7 @@ export function createStageServer(o: ServerOptions) {
         return send(res, 200, a);
       }
       if (parts[0] === 'api' && parts[1] === 'analyses' && parts[2] && req.method === 'GET') {
-        const a = rm.analyses.get(parts[2]);
+        const a = upgradeAnalysis(rm.analyses.get(parts[2]));
         return a ? send(res, 200, a) : send(res, 404, { error: '분석 없음' });
       }
       if (req.method === 'GET' && url.pathname === '/api/runs') {
@@ -209,7 +227,104 @@ export function createStageServer(o: ServerOptions) {
           const settled = await Promise.race([job, new Promise((r) => setTimeout(r, 50))]);
           return send(res, 202, settled ?? { accepted: true });
         }
-        if (req.method === 'POST' && parts[3] === 'complete-stage3') return send(res, 200, rm.completeStage3(id));
+        // ---- 실제 함수 직접 실행: 배포 후보 번들을 격리된 origin의 프레임에서 실제 window.sessionStorage로 실행 ----
+        if (req.method === 'GET' && parts[3] === 'live' && parts[4]) {
+          const live = run.realEnv?.live;
+          const sc = live?.scenarios[parts[4]];
+          if (!live || !sc) throw new HttpError(404, '직접 실행할 수 있는 시나리오 없음');
+          const html = await liveFrameHtml({ runId: id, sc, scenarioId: parts[4], argsText: url.searchParams.get('args') ?? undefined, seedText: url.searchParams.get('seed') ?? undefined });
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+          return res.end(html);
+        }
+        if (req.method === 'GET' && parts[3] === 'live-console') {
+          const live = run.realEnv?.live;
+          if (!live?.console) throw new HttpError(404, '직접 호출할 배포 후보 모듈 없음');
+          if (run.connected && run.connected.definition.presentationVersion !== 7) {
+            const testFile = path.join(run.project.root, run.testFile.path);
+            if (sha256(fs.readFileSync(testFile)) !== run.connected.definition.sourceHash) throw new HttpError(409, '테스트 파일이 변경되었습니다. 배포 후보를 다시 실행하세요.');
+            const fromDir = rm.analyses.get(run.analysisId)?.project?.packageDir ?? run.project.root;
+            const updated = connectedScenarios(testFile, fromDir, live.console.packageDir);
+            for (const scenario of updated.scenarios) {
+              if (run.connected.definition.scenarios.find(old => old.id === scenario.id)?.code !== scenario.code) delete run.connected.results[scenario.id];
+            }
+            run.connected.definition = { ...run.connected.definition, scenarios: updated.scenarios, presentationVersion: updated.presentationVersion };
+          }
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+          return res.end(run.connected ? connectedConsoleHtml({ runId: id, jobId: run.connected.jobId, definition: run.connected.definition, saved: run.connected.results }) : liveConsoleHtml({ runId: id, symbols: live.console.symbols, hint: url.searchParams.get('hint') ?? undefined }));
+        }
+        if (parts[3] === 'connected-targets') {
+          if (!run.connected || run.stages[2].status !== 'running') throw new HttpError(409, '3단계 실제 연결을 진행 중인 실행이 아닙니다.');
+          if (req.method === 'POST' && !parts[4]) {
+            const data = await body(req);
+            const scenario = run.connected.definition.scenarios.find(s => s.id === data.scenarioId);
+            if (!scenario?.network) throw new HttpError(400, '서버 연결 시나리오가 없습니다.');
+            const origin = `http://${req.headers.host}`;
+            return send(res, 201, await targets.create(id, scenario.network, origin));
+          }
+          if (req.method === 'POST' && parts[4] && parts[5] === 'emit') {
+            const data = await body(req);
+            if (typeof data.data !== 'string') throw new HttpError(400, 'SSE 데이터는 문자열이어야 합니다.');
+            targets.emit(id, parts[4], data.data);
+            return send(res, 200, { sent: true });
+          }
+          if (req.method === 'DELETE' && parts[4]) return send(res, 200, targets.close(id, parts[4]));
+          throw new HttpError(404, '검증 서버 작업 없음');
+        }
+        if (req.method === 'POST' && parts[3] === 'connected-scenario') {
+          const data = await body(req);
+          if (data.type === 'node') {
+            const configured = run.connected;
+            const live = run.realEnv?.live;
+            if (!configured || !live?.console || configured.jobId !== data.jobId || run.stages[2].status !== 'running' || !configured.definition.scenarios.some((s) => s.id === data.scenarioId)) throw new HttpError(409, '실행할 실제 협력자 시나리오가 없습니다.');
+            if (typeof data.input?.code !== 'string' || !data.input.connections || !data.input.values) throw new HttpError(400, '실제 연결 구성이 잘못되었습니다.');
+            // 서버가 직접 실행하는 경로이므로 임의 코드를 받지 않는다: 코드는 분석이 만든 원본과 같아야 하고, 연결식은 모듈·전역 API 참조/호출만 허용한다.
+            const original = configured.definition.scenarios.find((s) => s.id === data.scenarioId)!;
+            if (data.input.code !== original.code) throw new HttpError(403, '서버(Node)에서는 수정된 검증 코드를 실행하지 않습니다. 원본 코드로 실행하세요.');
+            for (const expression of Object.values(data.input.connections)) if (!isSafeConnectionExpression(String(expression))) throw new HttpError(403, `서버에서 실행할 수 없는 연결식입니다: ${String(expression).slice(0, 80)}`);
+            const result = await runConnectedNode({ dir: live.dir, console: live.console, scenario: configured.definition, input: data.input, signal: AbortSignal.timeout(65_000) });
+            return send(res, 200, { result });
+          }
+          rm.recordConnected(id, data, { userAgent: String(req.headers['user-agent'] ?? '') });
+          return send(res, 200, { results: run.connected?.results, connected: run.connected });
+        }
+        if (req.method === 'GET' && parts[3] === 'live-console.js') {
+          const live = run.realEnv?.live;
+          if (!live?.console) throw new HttpError(404, '직접 호출할 배포 후보 모듈 없음');
+          // 같은 실행의 번들은 모듈이 바뀌지 않으므로 한 번만 만든다(요청마다 esbuild를 돌리지 않음).
+          let f = liveBundles.get(live.dir);
+          if (!f || !fs.existsSync(f)) { f = await buildLiveConsole(live.dir, live.console); liveBundles.set(live.dir, f); }
+          res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' });
+          return res.end(fs.readFileSync(f));
+        }
+        if (req.method === 'GET' && parts[3] === 'live-file' && parts[4]) {
+          const live = run.realEnv?.live;
+          if (!live || !/^C\d+\.js$/.test(parts[4])) throw new HttpError(404, '파일 없음');
+          res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' });
+          return res.end(fs.readFileSync(path.join(live.dir, parts[4])));
+        }
+        if (req.method === 'POST' && parts[3] === 'export-code') {
+          if (!['passed', 'failed'].includes(run.stages[2].status)) throw new HttpError(409, '3단계 판정을 확정한 뒤 내보낼 수 있습니다.');
+          const drafts = await body(req);
+          if (drafts.console !== undefined && typeof drafts.console !== 'string') throw new HttpError(400, 'console은 코드 문자열이어야 합니다.');
+          if (drafts.scenarios !== undefined && (!drafts.scenarios || typeof drafts.scenarios !== 'object' || Array.isArray(drafts.scenarios) || Object.entries(drafts.scenarios).some(([id, value]: [string, any]) => !Object.hasOwn(run.realEnv?.live?.scenarios ?? {}, id) || !value || typeof value.args !== 'string' || typeof value.seed !== 'string'))) throw new HttpError(400, '시나리오 입력값이 올바르지 않습니다.');
+          const playground: { code: string; sessionId: string }[] = [];
+          if (drafts.playground !== undefined && (!drafts.playground || typeof drafts.playground !== 'object' || Array.isArray(drafts.playground))) throw new HttpError(400, '가상 화면 코드가 올바르지 않습니다.');
+          for (const [sessionId, code] of Object.entries(drafts.playground ?? {})) {
+            const session = pg.get(sessionId);
+            if (session.root !== run.project.root || typeof code !== 'string') throw new HttpError(400, '가상 화면의 프로젝트 또는 코드가 올바르지 않습니다.');
+            playground.push({ code, sessionId });
+          }
+          const { source, extension } = await exportStage3Component({ live: run.realEnv?.live, drafts, playground, projectRoot: run.project.root, connected: run.connected });
+          res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'content-disposition': `attachment; filename="Stage3Verification.${extension}"`, 'cache-control': 'no-store' });
+          return res.end(source);
+        }
+        if (req.method === 'POST' && parts[3] === 'complete-stage3') {
+          const b = await body(req);
+          const by = typeof b.operator === 'string' ? b.operator.trim() : '';
+          if (by.length < 2) throw new HttpError(400, '확정자 이름(operator)을 2자 이상 입력하세요. 누가 판정했는지가 보고서에 기록됩니다.');
+          if (b.confirm !== true) throw new HttpError(400, '확정 확인(confirm)이 필요합니다.');
+          return send(res, 200, rm.completeStage3(id, { by, userAgent: String(req.headers['user-agent'] ?? '') }));
+        }
         if (req.method === 'POST' && parts[3] === 'manual') return send(res, 201, rm.addManual(id, await body(req)));
         if (req.method === 'GET' && parts[3] === 'report') {
           const a = rm.analyses.get(run.analysisId)!;
@@ -224,5 +339,6 @@ export function createStageServer(o: ServerOptions) {
       send(res, 500, { error: String(e?.message ?? e) });
     }
   });
+  server.on('close', () => targets.dispose());
   return { server, rm, store, listProjects: () => [...projects], listen: () => new Promise<void>((r) => server.listen(o.port, o.host ?? '127.0.0.1', () => r())) };
 }

@@ -5,6 +5,17 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const j = (v) => esc(JSON.stringify(v, null, 2));
 const state = { meta: null, items: [], cur: null, seq: 0, analyzing: false, openJobs: new Set() };
 
+// 오류·안내는 모달(alert)이 아니라 화면에 남는 알림으로 보여준다. 닫을 때까지 유지되고 스크린리더가 읽는다.
+function notify(message, kind = 'error') {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.className = `toast ${kind}`;
+  t.replaceChildren();
+  const text = document.createElement('span'); text.textContent = String(message);
+  const close = document.createElement('button'); close.type = 'button'; close.className = 'link'; close.textContent = '닫기'; close.onclick = () => t.classList.add('hidden');
+  t.append(text, ' ', close);
+}
+
 async function api(method, url, body) {
   const r = await fetch(url, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
   const data = await r.json().catch(() => ({}));
@@ -122,7 +133,7 @@ async function enqueue(it) {
     it.run = await api('POST', '/api/runs', { analysisId: it.analysis.id });
     it.follow = true; autoStep(it);
     loadHistory();
-  } catch (e) { alert(e.message); }
+  } catch (e) { notify(e.message); }
   renderAll();
   refreshRun(it);
 }
@@ -392,7 +403,82 @@ function kindText(s) {
   return s.text ?? s.kind;
 }
 
+// 직접 호출 프레임의 편집값은 같은 실행 항목에 보관해 판정 확정 후에도 내보낸다.
+window.addEventListener('message', async (e) => {
+  if (e.data?.connectedScenario !== true) return;
+  const it = state.items.find(item => item.run?.id === e.data.runId);
+  const frame = [...document.querySelectorAll('.console-frame')].find(f => f.contentWindow === e.source);
+  if (!it || !frame || (frame.src && e.origin !== new URL(frame.src).origin)) return;
+  const data = e.data;
+  try {
+    const response = await api('POST', `/api/runs/${it.run.id}/connected-scenario`, data);
+    if (data.type === 'node') frame.contentWindow.postMessage({ connectedNodeResult: { requestId: data.requestId, result: response.result } }, e.origin);
+    else {
+      const latest = it.run.connected.sequences?.[data.scenarioId] ?? 0;
+      if ((response.connected?.sequences?.[data.scenarioId] ?? 0) < latest) return;
+      it.run.connected = response.connected;
+      const count = Object.values(response.results).filter(r => r.result.status === 'passed').length;
+      const status = document.querySelector('.connected-progress');
+      if (status) status.textContent = `실제 협력자 기대 결과 ${count}/${it.run.connected.definition.scenarios.length}개 통과`;
+      $('#complete3').disabled = !['running', 'preparing'].includes(it.run.stages[2].status) || count !== it.run.connected.definition.scenarios.length;
+    }
+  } catch (error) {
+    frame.contentWindow.postMessage({ connectedNodeResult: { requestId: data.requestId, error: error.message } }, e.origin);
+    if (data.type !== 'node') notify('실행 결과 저장 실패: ' + error.message);
+  }
+});
+window.addEventListener('message', (e) => {
+  if (e.data?.stageCode !== true) return;
+  const it = state.cur;
+  if (!it?.run || e.data.runId !== it.run.id) return;
+  const frame = [...document.querySelectorAll('.console-frame, .live-frame')].find((f) => f.contentWindow === e.source);
+  if (!frame || (frame.src && e.origin !== new URL(frame.src).origin)) return;
+  it.liveDrafts ??= { scenarios: {} };
+  if (frame.classList.contains('console-frame') && typeof e.data.code === 'string') it.liveDrafts.console = e.data.code;
+  if (frame.dataset.sid === e.data.scenarioId && typeof e.data.args === 'string' && typeof e.data.seed === 'string') it.liveDrafts.scenarios[frame.dataset.sid] = { args: e.data.args, seed: e.data.seed };
+});
+
+function renderCodeExport(it) {
+  for (const button of document.querySelectorAll('.export-code')) {
+    button.disabled = !(it.run?.realEnv?.live || Object.keys(it.playgroundCodes ?? {}).length) || !['passed', 'failed'].includes(it.run.stages[2].status);
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/runs/${it.run.id}/export-code`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...it.liveDrafts, playground: it.playgroundCodes }) });
+        if (!response.ok) throw new Error((await response.json()).error);
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.createElement('a');
+        link.href = url; link.download = response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] ?? 'Stage3Verification.tsx';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (e) { notify(e.message); }
+      finally { renderCodeExport(it); }
+    };
+  }
+}
+
+// 프로젝트를 모르는 사람을 위한 게이트 요약: 판정, 검증한 것, 못한 것, 지금 할 일을 보고서와 같은 근거로 보여준다.
+const gateCache = new Map();
+async function renderGateCard(it) {
+  const run = it.run; const host = $('#gate-card');
+  const key = JSON.stringify([run.id, run.stages.map((s) => s.status), run.jobs.length, run.manual.length, run.signoff?.at, Object.entries(run.connected?.results ?? {}).map(([k, v]) => [k, v.result.status, v.evidence?.modified])]);
+  if (gateCache.get(run.id)?.key !== key) {
+    gateCache.set(run.id, { key, report: null });
+    try { const r = await api('GET', `/api/runs/${run.id}/report`); if (gateCache.get(run.id)?.key === key) gateCache.get(run.id).report = r; } catch { /* 아래에서 표시 */ }
+  }
+  const r = gateCache.get(run.id)?.report;
+  if (!r) { host.innerHTML = '<p class="muted small">게이트 요약을 불러오는 중…</p>'; return; }
+  const tone = { 'within-scope-pass': 'pass', conditional: 'partial', 'hold-failure': 'fail', undecided: 'queued' }[r.decision.code];
+  const list = (xs, empty) => xs.length ? `<ul class="small">${xs.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : `<p class="small muted">${empty}</p>`;
+  host.innerHTML = `<h3>배포 게이트 요약 ${badge('s-' + tone, r.decision.label)}</h3>
+    <p><b>지금 할 일:</b> ${esc(r.summary.nextAction)}</p>
+    <div class="cols"><div><b class="small">검증한 것</b>${list(r.summary.verified, '아직 없음')}</div><div><b class="small">검증하지 못한 것</b>${list(r.summary.unverified, '없음')}</div></div>
+    ${r.decision.reasons.length ? `<details><summary class="small">판정 사유 ${r.decision.reasons.length}건</summary>${list(r.decision.reasons, '')}</details>` : ''}
+    <p class="small muted">${r.evidence.signoff ? `확정: ${esc(r.evidence.signoff.by)} · ${esc(r.evidence.signoff.at)}` : '아직 확정되지 않았습니다.'} · 이 요약은 통합 보고서와 같은 근거입니다.</p>`;
+}
+
 function renderOps(it) {
+  renderCodeExport(it);
   const run = it.run;
   const a = it.analysis;
   const s3 = run.stages[2];
@@ -405,11 +491,19 @@ function renderOps(it) {
     $('#s3-locked').textContent = isTerminal(s2.status) ? `2단계가 통과하지 못해 3단계는 열리지 않습니다. (${s2.reason})` : '2단계를 통과하면 이 화면이 열립니다.';
     return;
   }
-  $('#env').innerHTML = `<span><b>실행 환경</b> Node ${esc(run.environment.node)} (${esc(run.environment.platform)}) 자식 프로세스</span><span><b>배포 후보</b> <code>${esc(run.candidate?.id)}</code></span>${a.script || run.replayMode ? '' : `<span><b>Stage 대상</b> <code>${esc(run.environment.stageTarget ?? '설정 없음')}</code></span>`}<span><b>3단계</b> ${badge('s-' + s3.status, L('EXEC_LABEL', s3.status))} ${esc(s3.reason)}</span>`;
-  $('#complete3').disabled = !active;
-  $('#complete3').onclick = async () => { try { await api('POST', `/api/runs/${run.id}/complete-stage3`); } catch (e) { alert(e.message); } };
+  $('#env').innerHTML = `<span><b>실행 환경</b> Node ${esc(run.environment.node)} (${esc(run.environment.platform)}) 자식 프로세스</span><span><b>배포 후보</b> <code>${esc(run.candidate?.id)}</code></span>${a.script || run.replayMode ? '' : `<span><b>Stage 대상</b> <code>${esc(run.environment.stageTarget ?? '설정 없음')}</code></span>`}<span><b>3단계</b> ${badge('s-' + s3.status, L('EXEC_LABEL', s3.status))} ${esc(run.connected && active ? '시나리오별 실제 협력자 연결과 기대 결과를 확인하세요.' : s3.reason)}</span>`;
+  const connectedPending = run.connected?.definition.scenarios.filter(scenario => run.connected.results[scenario.id]?.result.status !== 'passed').length;
+  const syncComplete = () => { $('#complete3').disabled = !active || !!connectedPending || $('#operator').value.trim().length < 2 || !$('#confirm3').checked; };
+  $('#operator').oninput = syncComplete; $('#confirm3').onchange = syncComplete;
+  if (!$('#operator').value) try { $('#operator').value = localStorage.getItem('stage.operator') ?? ''; } catch {}
+  syncComplete();
+  $('#complete3').onclick = async () => {
+    try { localStorage.setItem('stage.operator', $('#operator').value.trim()); } catch {}
+    try { await api('POST', `/api/runs/${run.id}/complete-stage3`, { operator: $('#operator').value.trim(), confirm: $('#confirm3').checked }); $('#confirm3').checked = false; } catch (e) { notify(e.message); }
+  };
+  renderGateCard(it);
   const sp = $('#script-panel');
-  $('#complete3-hint').textContent = run.replayMode ? '원본 테스트를 배포 후보 파일로 재실행한 최신 결과로 판정합니다. 브라우저 API에 의존하는 테스트는 mock 결과만으로 통과시키지 않고, 실제 브라우저 검증이 일치해야 통과합니다. 배포본이 한 번도 로드되지 않았거나 배포물에 없는 파일이 있어도 실패입니다.' : a.script ? '배포 exports 런타임 import 검증의 최신 결과와 치환 잔여로 판정합니다. 확인 필요 항목은 사람이 확인해 기록합니다.' : 'Stage 모드 조작의 시나리오별 최신 결과로만 판정합니다. Mock 조작은 별도로 보고합니다.';
+  $('#complete3-hint').textContent = run.connected ? '모든 시나리오에서 실제 협력자를 연결하고 기대 결과를 확인하면 판정을 확정할 수 있습니다.' : run.replayMode ? '원본 테스트를 배포 후보 파일로 재실행한 최신 결과로 판정합니다. 브라우저 API에 의존하는 테스트는 mock 결과만으로 통과시키지 않고, 실제 브라우저 검증이 일치해야 통과합니다. 배포본이 한 번도 로드되지 않았거나 배포물에 없는 파일이 있어도 실패입니다.' : a.script ? '배포 exports 런타임 import 검증의 최신 결과와 치환 잔여로 판정합니다. 확인 필요 항목은 사람이 확인해 기록합니다.' : 'Stage 모드 조작의 시나리오별 최신 결과로만 판정합니다. Mock 조작은 별도로 보고합니다.';
   if (run.replayMode) {
     $('#wiring').replaceChildren(); $('#playground').replaceChildren(); $('#ops').replaceChildren();
     renderReplayPanel(it, sp, active);
@@ -498,7 +592,7 @@ function renderScriptPanel(it, host, active) {
     ${section('diff', `산출물 변화 <span class="muted small">${d ? d.total + '개' : ''}</span>`, diffBody)}
     ${section('left', `하위 패키지 이름 치환 잔여 <span class="muted small">${sc?.leftovers.length ?? 0}개 파일</span>`, leftBody)}
   </div>`;
-  host.querySelector('.sp-run').onclick = async (e) => { e.target.disabled = true; try { await api('POST', `/api/runs/${run.id}/exports-check`); } catch (err) { alert(err.message); } };
+  host.querySelector('.sp-run').onclick = async (e) => { e.target.disabled = true; try { await api('POST', `/api/runs/${run.id}/exports-check`); } catch (err) { notify(err.message); } };
   for (const b of host.querySelectorAll('.sp-filter')) b.onclick = () => { st.filter = b.dataset.f; renderScriptPanel(it, host, active); };
   for (const dEl of host.querySelectorAll('details[data-sec]')) dEl.addEventListener('toggle', () => { if (dEl.open) st.open.add(dEl.dataset.sec); else st.open.delete(dEl.dataset.sec); });
 }
@@ -511,7 +605,7 @@ function renderReplayPanel(it, host, active) {
   const re = run.realEnv;
   const s1 = run.jobs.find((j) => j.kind === 'stage1')?.stage1;
   const running = run.jobs.some((j) => j.kind === 'replay' && (j.status === 'queued' || j.status === 'running'));
-  if (!it.rp) it.rp = { open: new Set(['tests', 'real']), filter: 'all' };
+  if (!it.rp) it.rp = { open: new Set(['real']), filter: 'all', live: new Set(), console: true };
   const st = it.rp;
   if (host.dataset.run !== run.id) { host.dataset.run = run.id; host.replaceChildren(); }
   const tests = rp?.run.tests ?? [];
@@ -533,7 +627,8 @@ function renderReplayPanel(it, host, active) {
   }).join('') || '<p class="muted small">해당하는 항목 없음</p>';
   const modules = rp ? `<p class="small muted">원본 테스트가 import한 프로젝트 dist 파일이 아래 배포 후보 파일로 바뀌어 실행됐습니다(<code>${esc(rp.packageDir)}</code> 기준).</p>${rp.redirected.map((f) => `<div class="small"><code>${esc(f)}</code></div>`).join('') || '<p class="small muted">없음</p>'}${rp.missing.length ? `<p class="small">${badge('s-failed', '배포물에 없음')}</p>${rp.missing.map((f) => `<div class="small"><code>${esc(f)}</code></div>`).join('')}` : ''}` : '<p class="small muted">아직 실행하지 않았습니다.</p>';
   const kv = (o) => Object.keys(o ?? {}).length ? Object.entries(o).map(([k, v]) => `<div class="small"><code>${esc(k)}</code> = <code>${esc(v)}</code></div>`).join('') : '<span class="small muted">비어 있음</span>';
-  const obs = (o, env) => !o ? '<span class="small muted">결과 없음</span>' : `${o.threw ? `<div class="small">${badge('s-failed', '예외')} ${esc(o.threw.name)}: ${esc(o.threw.message)}</div>` : ''}${env === 'browser' ? `<div class="small muted">실제 sessionStorage</div>${kv(o.storage?.sessionStorage)}<div class="small muted">실제 호출 순서</div>${(o.calls ?? []).map((c) => `<div class="small"><code>${esc(c.slice(0, 2).join('.'))}(${esc(c.slice(2).map((x) => JSON.stringify(x)).join(', '))})</code></div>`).join('') || '<span class="small muted">저장소 호출 없음</span>'}` : `<div class="small">window ${o.storage?.windowDefined ? '정의됨' : '<b>없음</b>(서버 환경)'}</div><div class="small muted">저장소 호출 ${(o.calls ?? []).length}회</div>`}`;
+  const vars = (o) => o.variants ? `<div class="small muted">실제 스키마별 결과</div>${Object.entries(o.variants).map(([k, v]) => `<div class="small"><code>${esc(k)}</code> → ${v.threw ? `예외 ${esc(v.threw.message)}` : `<code>${esc(JSON.stringify(v.returned))}</code>`}</div>`).join('')}` : '';
+  const obs = (o, env) => !o ? '<span class="small muted">결과 없음</span>' : `${o.threw ? `<div class="small">${badge('s-failed', '예외')} ${esc(o.threw.name)}: ${esc(o.threw.message)}</div>` : ''}${vars(o)}${(o.calls ?? []).filter((c) => c[0] === 'console').map((c) => `<div class="small"><code>${esc(c.slice(0, 2).join('.'))}(${esc(c.slice(2).map((x) => JSON.stringify(x)).join(', '))})</code></div>`).join('')}${env === 'browser' ? `<div class="small muted">실제 sessionStorage</div>${kv(o.storage?.sessionStorage)}<div class="small muted">실제 호출 순서</div>${(o.calls ?? []).map((c) => `<div class="small"><code>${esc(c.slice(0, 2).join('.'))}(${esc(c.slice(2).map((x) => JSON.stringify(x)).join(', '))})</code></div>`).join('') || '<span class="small muted">저장소 호출 없음</span>'}` : `<div class="small">window ${o.storage?.windowDefined ? '정의됨' : '<b>없음</b>(서버 환경)'}</div><div class="small muted">저장소 호출 ${(o.calls ?? []).length}회</div>`}`;
   const vbadge = (v) => badge(v === 'pass' ? 's-pass' : 's-failed', v === 'pass' ? '일치' : v === 'fail' ? '불일치' : '오류');
   const realRows = re ? re.scenarios.map((x) => {
     const showRuns = x.runs.filter((r, i) => r.verdict !== 'pass' || i === 0);
@@ -541,22 +636,46 @@ function renderReplayPanel(it, host, active) {
       <div class="exp-s small"><code>${esc(x.exportName)}(${esc(x.args.join(', '))})</code> <span class="muted">${esc(run.testFile.path)}:${x.line}</span></div>
       <div class="small" style="margin:.2rem 0">${x.runs.map((r) => `${vbadge(r.verdict)} <span class="muted">${esc(r.browser)}</span>`).join(' &nbsp; ')}</div>
       <div class="small muted">${esc(x.reason)}</div>
+      ${x.env === 'browser' && re.live?.scenarios[x.id] ? `<div style="margin:.3rem 0"><button class="btn live-run" data-sid="${esc(x.id)}" type="button">${st.live.has(x.id) ? '직접 실행 닫기' : '실제 함수로 직접 실행'}</button> <span class="small muted">mock 없이 배포 후보의 <code>${esc(x.exportName)}</code>를 이 컴퓨터의 브라우저에서 실제 sessionStorage로 호출합니다</span></div>${st.live.has(x.id) ? `<iframe class="live-frame" data-sid="${esc(x.id)}" title="직접 실행" style="width:100%;height:21rem;border:1px solid var(--line,#ddd);border-radius:6px"></iframe>` : ''}` : ''}
       ${showRuns.map((r) => `<details style="margin-top:.3rem" ${r.verdict !== 'pass' ? 'open' : ''}><summary class="small">${esc(r.browser)} — 상세</summary><div class="row gap wrap" style="align-items:flex-start"><div style="flex:1;min-width:14rem"><div class="small"><b>프로젝트 dist(기준)</b></div>${obs(r.base, x.env)}</div><div style="flex:1;min-width:14rem"><div class="small"><b>배포 후보</b></div>${obs(r.cand, x.env)}</div></div></details>`).join('')}</div>`;
   }).join('') + (re.skipped.length ? `<p class="small muted" style="margin-top:.6rem">재현하지 못해 건너뛴 호출 ${re.skipped.length}개: ${re.skipped.map((k) => `${esc(k.testName)}(${esc(k.reason)})`).join(' / ')}</p>` : '') : '';
   const cover = re ? `<div class="small" style="margin:.4rem 0"><b>크로스브라우징 커버리지</b> ${re.browsers.map((b) => `${badge(b.ok ? 's-pass' : 's-failed', b.ok ? '실행' : '실패')} ${esc(b.name)}${b.ok ? '' : ` <span class="muted">(${esc(b.reason)})</span>`}`).join(' &nbsp; ') || '<span class="muted">브라우저 없음</span>'}${re.browsers.filter((b) => b.ok).length === 1 ? ` ${badge('s-not-applicable', '단일 브라우저 — 크로스브라우징 미확인')}` : ''}</div>` : '';
-  const realBody = re ? `<p class="small muted">테스트 안의 SUT 호출을 그대로 가져와 <b>설치된 실제 브라우저들</b>(실제 window.sessionStorage)에서 프로젝트 dist와 배포 후보에 각각 실행하고, 저장소 상태·호출 순서·반환·예외를 비교했습니다. 같은 배포 후보가 브라우저마다 다른 결과를 내는지도 비교합니다. mock은 쓰지 않습니다.</p>${cover}${re.status !== 'passed' ? `<p class="small">${badge('s-failed', '미통과')} ${esc(re.reason)}</p>` : ''}${realRows}` : '';
+  const connectedCount = Object.values(run.connected?.results ?? {}).filter(r => r.result.status === 'passed').length;
+  const consoleBlock = re?.live?.console ? `<div style="margin:.6rem 0"><button class="btn console-run" type="button">${st.console ? '구성 화면 닫기' : '실제 협력자 구성·검증'}</button> <span class="small connected-progress">${run.connected ? `실제 협력자 기대 결과 ${connectedCount}/${run.connected.definition.scenarios.length}개 통과` : '배포 후보 직접 호출'}</span></div>${st.console ? '<iframe class="console-frame" title="실제 협력자 시나리오 검증" style="width:100%;height:52rem;border:1px solid var(--line,#ddd);border-radius:6px"></iframe>' : ''}` : '';
+  const realBody = run.connected ? consoleBlock : re ? `<p class="small muted">테스트 안의 SUT 호출을 그대로 가져와 <b>설치된 실제 브라우저들</b>(실제 window.sessionStorage)에서 프로젝트 dist와 배포 후보에 각각 실행하고, 저장소 상태·호출 순서·반환·예외를 비교했습니다. 같은 배포 후보가 브라우저마다 다른 결과를 내는지도 비교합니다. mock은 쓰지 않습니다.</p>${cover}${re.status !== 'passed' ? `<p class="small">${badge('s-failed', '미통과')} ${esc(re.reason)}</p>` : ''}${realRows}${consoleBlock}` : '';
   const out = rp ? `<pre class="log">${esc(rp.run.output ?? '')}</pre>` : '';
   host.innerHTML = `<div class="card">
     <h4>${re ? '실환경 검증 · 배포 후보 재실행' : '배포 후보 재실행'} <span class="muted small"><code>${esc(run.testFile.path)}</code></span></h4>
-    <p class="small muted">이 테스트는 협력자를 대체 객체로 바꿔 호출 인자를 검증하는 런던파 스타일이라 입력→출력 조작 화면으로 옮기지 않습니다. 대신 <b>원본 테스트를 수정 없이</b>(mock 기준, 참고용) 실행하고, 브라우저 API를 쓰는 테스트는 별도로 <b>실제 브라우저 검증</b>을 합니다. 원본 재실행은, 프로젝트 <code>dist</code> import만 소비자 샌드박스에 설치된 <b>배포 후보 파일</b>로 바꿔 같은 mock·assert를 그대로 적용합니다. peer 의존성(React 등)은 테스트 쪽 사본을 공유합니다.</p>
-    <div class="metrics">${card('mock 재실행(참고)', rp ? `${nPass}/${tests.length}` : '—', rp ? (nFail ? `실패 ${nFail}개` : '협력자 mock 기준 · 실제 환경 아님') : '')}${card('배포 후보 모듈', rp ? `${rp.redirected.length}개` : '—', rp?.missing.length ? `배포물에 없는 파일 ${rp.missing.length}개` : '로드된 파일')}${re ? card('실제 브라우저 검증', `${re.scenarios.filter((x) => x.verdict === 'pass').length}/${re.scenarios.length}`, re.status === 'passed' ? '실제 환경 결과 일치' : '미통과') : ''}${card('원본(1단계)', s1 ? `${s1.tests.filter((t) => t.status === 'pass').length}/${s1.tests.length}` : '—', '프로젝트 dist 기준')}</div>
+    ${run.connected ? '<p class="small muted">시나리오를 고르고 실제 검증 규칙을 선택한 뒤 검증 실행을 누르세요.</p>' : `<p class="small muted">런던파 테스트를 배포 후보로 재실행한 뒤, 시나리오별로 실제 협력자를 연결해 실행하고 기대 결과를 검증합니다. 원본 mock 테스트 결과는 참고용이며, 3단계 확정에는 모든 시나리오의 실제 실행·기대 결과 검증이 필요합니다. 원본 재실행은, 프로젝트 <code>dist</code> import만 소비자 샌드박스에 설치된 <b>배포 후보 파일</b>로 바꿔 같은 mock·assert를 그대로 적용합니다. peer 의존성(React 등)은 테스트 쪽 사본을 공유합니다.</p>`}
+    <div class="metrics">${card('mock 재실행(참고)', rp ? `${nPass}/${tests.length}` : '—', rp ? (nFail ? `실패 ${nFail}개` : '협력자 mock 기준 · 실제 환경 아님') : '')}${card('배포 후보 모듈', rp ? `${rp.redirected.length}개` : '—', rp?.missing.length ? `배포물에 없는 파일 ${rp.missing.length}개` : '로드된 파일')}${re && !run.connected ? card('실제 환경 검증', re.scenarios.length ? `${re.scenarios.filter((x) => x.verdict === 'pass').length}/${re.scenarios.length}` : '직접 호출', re.status !== 'passed' ? '미통과' : re.manual ? (re.scenarios.length ? `일치 · 직접 확인 ${re.skipped.length}건` : '자동 재현 불가 · 사람이 확인') : '실제 환경 결과 일치') : ''}${card('원본(1단계)', s1 ? `${s1.tests.filter((t) => t.status === 'pass').length}/${s1.tests.length}` : '—', '프로젝트 dist 기준')}</div>
     <div class="row gap" style="margin:.6rem 0"><button class="btn primary rp-run" type="button" ${active && !running ? '' : 'disabled'}>${running ? '재실행 중…' : rp ? '배포 후보로 다시 실행' : '배포 후보로 실행'}</button></div>
-    ${re ? section('real', `실제 브라우저 검증 <span class="muted small">${re.scenarios.length}개 시나리오</span>`, realBody) : ''}
+    ${re ? section('real', `실제 환경 검증 <span class="muted small">${run.connected ? run.connected.definition.scenarios.length : re.scenarios.length}개 시나리오${run.connected ? ' · 실제 협력자 연결' : re.manual ? ' · 직접 호출 필요' : ''}</span>`, realBody) : ''}
     ${section('tests', `mock 재실행 결과(참고) <span class="muted small">${tests.length}개</span>`, `<div class="row gap wrap small" style="margin:.2rem 0"><span class="mode">${filterBtn('all', '전체')}${filterBtn('fail', '실패')}${filterBtn('pass', '통과')}</span></div>${rows}`)}
     ${section('modules', `로드된 배포 후보 모듈 <span class="muted small">${rp ? rp.redirected.length + '개' : ''}</span>`, modules)}
     ${section('out', '러너 출력', out || '<p class="small muted">아직 실행하지 않았습니다.</p>')}
   </div>`;
-  host.querySelector('.rp-run').onclick = async (e) => { e.target.disabled = true; try { await api('POST', `/api/runs/${run.id}/replay`); } catch (err) { alert(err.message); } };
+  // 직접 실행: 스테이지 UI와 다른 origin(localhost ↔ 127.0.0.1)의 프레임에서 열어 UI 자신의 sessionStorage를 건드리지 않는다.
+  const alt = { localhost: '127.0.0.1', '127.0.0.1': 'localhost' }[location.hostname];
+  // 격리 실행은 localhost↔127.0.0.1 별도 출처가 필요하다. 그 외 주소에서는 저장소·서버 호출이 막혀 오판할 수 있으므로 조용히 깨지게 두지 않고 막는다.
+  if (!alt && host.querySelector('.live-frame, .console-frame')) {
+    for (const f of host.querySelectorAll('.live-frame, .console-frame')) f.replaceWith(Object.assign(document.createElement('p'), { className: 's-fail small', textContent: `이 주소(${location.hostname})에서는 격리 실행을 지원하지 않습니다. 실제 저장소·서버 호출을 정확히 검증할 수 없으므로 http://localhost:${location.port} 로 접속해 실행하세요.` }));
+  }
+  for (const f of host.querySelectorAll('.live-frame')) {
+    const draft = it.liveDrafts?.scenarios?.[f.dataset.sid];
+    const query = draft ? '?' + new URLSearchParams({ args: draft.args, seed: draft.seed }) : '';
+    const src = `/api/runs/${run.id}/live/${encodeURIComponent(f.dataset.sid)}${query}`;
+    if (alt) { f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms'); f.src = `${location.protocol}//${alt}${location.port ? ':' + location.port : ''}${src}`; }
+    else { f.setAttribute('sandbox', 'allow-scripts allow-forms'); fetch(src).then((r) => r.text()).then((h) => { f.srcdoc = h; }); }
+  }
+  for (const f of host.querySelectorAll('.console-frame')) {
+    const src = `/api/runs/${run.id}/live-console`;
+    f.onload = () => { if (!run.connected && it.liveDrafts?.console !== undefined) f.contentWindow.postMessage({ restoreStageCode: it.liveDrafts.console }, alt ? new URL(f.src).origin : '*'); };
+    if (alt) { f.setAttribute('sandbox', 'allow-scripts allow-same-origin'); f.src = `${location.protocol}//${alt}${location.port ? ':' + location.port : ''}${src}`; }
+    else { f.setAttribute('sandbox', 'allow-scripts'); fetch(src).then((r) => r.text()).then((h) => { f.srcdoc = h; }); }
+  }
+  for (const b of host.querySelectorAll('.console-run')) b.onclick = () => { st.console = !st.console; renderReplayPanel(it, host, active); };
+  for (const b of host.querySelectorAll('.live-run')) b.onclick = () => { if (st.live.has(b.dataset.sid)) st.live.delete(b.dataset.sid); else st.live.add(b.dataset.sid); renderReplayPanel(it, host, active); };
+  host.querySelector('.rp-run').onclick = async (e) => { e.target.disabled = true; try { await api('POST', `/api/runs/${run.id}/replay`); } catch (err) { notify(err.message); } };
   for (const b of host.querySelectorAll('.sp-filter')) b.onclick = () => { st.filter = b.dataset.f; renderReplayPanel(it, host, active); };
   for (const dEl of host.querySelectorAll('details[data-sec]')) dEl.addEventListener('toggle', () => { if (dEl.open) st.open.add(dEl.dataset.sec); else st.open.delete(dEl.dataset.sec); });
 }
@@ -622,7 +741,7 @@ function drawWiring(it) {
   }
   const bindOf = (c, k) => doc?.bindings[`${c.id}.${k.option}`] ?? 'real';
   const canOpen = !!doc && JSON.stringify(doc) === st.saved;
-  const openBtn = (t, c) => (/^use[A-Z]/.test(c.sut) ? ` <button class="btn pg-open" data-t="${esc(t.id)}" data-c="${esc(c.id)}" type="button" ${canOpen ? '' : 'disabled title="프로필을 저장한 뒤 열 수 있습니다"'}>가상 화면 열기</button>` : ' <span class="muted">(가상 화면은 Hook만 지원)</span>');
+  const openBtn = (t, c) => (c.hook && c.clientFactory ? ` <button class="btn pg-open" data-t="${esc(t.id)}" data-c="${esc(c.id)}" type="button" ${canOpen ? '' : 'disabled title="프로필을 저장한 뒤 열 수 있습니다"'}>가상 화면 열기</button>` : ' <span class="muted">(가상 화면은 Hook·HTTP 클라이언트 구현 확인 필요)</span>');
   const testHtml = w.tests.map((t) => `<details class="job" data-t="${esc(t.id)}" ${it.wiringOpen.has(t.id) ? 'open' : ''}><summary>${esc(t.path.join(' › '))} <span class="muted small">${t.calls.map((c) => `${esc(c.sut)}(${esc(c.path ?? '')})`).join(', ')}</span>${t.globals.length ? ` ${badge('s-not-applicable', '전역 대체: ' + t.globals.join(', '))}` : ''}</summary><div class="body">
       ${t.calls.map((c) => `<div class="small"><b>${esc(c.sut)}</b> <span class="muted">${esc(locText(c.loc))}</span>${openBtn(t, c)}
         <div>${c.options.filter((o) => o.kind === 'literal').map((o) => `<code>${esc(o.key)}=${esc(JSON.stringify(o.value))}</code>`).join(' ') || '<span class="muted">고정 옵션 없음</span>'}</div>
@@ -653,7 +772,7 @@ function drawWiring(it) {
   on('.w-add', 'click', () => {
     const name = prompt('새 프로필 이름');
     if (!name || !name.trim()) return;
-    if (doc.profiles.some((x) => x.name === name.trim())) { alert('같은 이름의 프로필이 있습니다'); return; }
+    if (doc.profiles.some((x) => x.name === name.trim())) { notify('같은 이름의 프로필이 있습니다'); return; }
     doc.profiles.push({ name: name.trim(), mode: 'stage', allowedHosts: [], allowMutations: false, headers: {} });
     doc.active = name.trim();
     drawWiring(it);
@@ -703,6 +822,9 @@ async function openPlayground(it, testId, callId, btn) {
     it.pg = pg;
     const code = el.querySelector('.pg-code');
     code.value = r.source;
+    it.playgroundCodes ??= {};
+    it.playgroundCodes[pg.id] = code.value;
+    code.addEventListener('input', () => { it.playgroundCodes[pg.id] = code.value; });
     code.addEventListener('keydown', (e) => {
       if (e.key !== 'Tab') return;
       e.preventDefault();
@@ -737,7 +859,7 @@ async function openPlayground(it, testId, callId, btn) {
     el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     startPgPoll();
     rebuild();
-  } catch (e) { alert(e.message); } finally { btn.disabled = false; }
+  } catch (e) { notify(e.message); } finally { btn.disabled = false; }
 }
 
 function drawPgEvents(pg) {
@@ -794,23 +916,24 @@ function buildOpCard(it, card, sc) {
     const mode = it.mode[sc.id];
     let routes;
     const txt = card.querySelector('.routes').value.trim();
-    if (mode === 'mock' && txt) { try { routes = JSON.parse(txt); } catch { return alert('Mock 응답 JSON 형식 오류'); } }
+    if (mode === 'mock' && txt) { try { routes = JSON.parse(txt); } catch { return notify('Mock 응답 JSON 형식 오류'); } }
     const args = form.args.map((v) => (v === undefined ? { $stage: 'undefined' } : v));
     while (args.length && args[args.length - 1]?.$stage === 'undefined') args.pop();
     try { await api('POST', `/api/runs/${it.run.id}/interactions`, { scenarioId: sc.id, stepId: step.id, mode, args, routes }); }
-    catch (e) { alert(e.message); }
+    catch (e) { notify(e.message); }
   };
 }
 
 $('#manual').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = new FormData(e.target);
-  try { await api('POST', `/api/runs/${state.cur.run.id}/manual`, Object.fromEntries(f)); e.target.reset(); } catch (err) { alert(err.message); }
+  try { await api('POST', `/api/runs/${state.cur.run.id}/manual`, Object.fromEntries(f)); e.target.reset(); } catch (err) { notify(err.message); }
 });
 
 // ---- 보고서 ----
 let reportTimer;
 function renderReport(it) {
+  renderCodeExport(it);
   clearTimeout(reportTimer);
   reportTimer = setTimeout(async () => {
     const run = it.run;

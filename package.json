@@ -11,7 +11,8 @@
     "stage": "node --env-file-if-exists=.env.stage stage/src/cli.ts --project examples/order-client",
     "stage:server": "node --env-file-if-exists=.env.stage examples/order-stage-server/server.mjs",
     "test": "node --test \"stage/test/**/*.test.ts\"",
-    "stage:dev": "node --env-file-if-exists=.env.stage stage/src/cli.ts --watch --project examples/order-client"
+    "stage:dev": "node --env-file-if-exists=.env.stage stage/src/cli.ts --watch --project examples/order-client",
+    "stage:ci": "node --env-file-if-exists=.env.stage stage/src/ci.ts"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

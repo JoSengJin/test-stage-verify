@@ -102,6 +102,7 @@
           <h2 id="h-s3">3단계 · 사용자 조작·Stage 연계</h2>
           <div id="s3-locked" class="empty hidden"></div>
           <div id="s3-body">
+            <div id="gate-card" class="card gate" aria-live="polite"></div>
             <div id="env" class="env"></div>
             <div id="wiring"></div>
             <div id="playground"></div>
@@ -109,6 +110,9 @@
             <div id="ops"></div>
             <div id="s3-jobs"></div>
             <div class="row gap confirm">
+              <button class="btn export-code" type="button" disabled>React 컴포넌트 내보내기</button>
+              <label class="small">확정자 이름 <input id="operator" autocomplete="name" maxlength="80" placeholder="예: 홍길동 (보고서에 기록됨)" aria-describedby="complete3-hint"></label>
+              <label class="small"><input id="confirm3" type="checkbox"> 위 요약과 미검증 항목을 읽었고, 이 판정에 책임집니다</label>
               <button class="btn primary" id="complete3" type="button">3단계 판정 확정</button>
               <span class="muted small" id="complete3-hint">Stage 모드 조작의 시나리오별 최신 결과로만 판정합니다. Mock 조작은 별도로 보고합니다.</span>
             </div>
@@ -125,6 +129,7 @@
 
         <section class="screen" id="screen-report" aria-labelledby="h-report">
           <h2 id="h-report">통합 보고서 <a id="report-html" class="small" target="_blank">HTML로 열기</a></h2>
+          <button class="btn export-code" type="button" disabled>React 컴포넌트 내보내기</button>
           <div id="report"></div>
         </section>
       </div>
@@ -133,5 +138,6 @@
 
   <div id="veil" class="veil" aria-hidden="true"><div>놓으면 큐에 추가됩니다</div></div>
   <script type="module" src="/app.js"></script>
+<div id="toast" class="toast hidden" role="alert" aria-live="assertive"></div>
 </body>
 </html>

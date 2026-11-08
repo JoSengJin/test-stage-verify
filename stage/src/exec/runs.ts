@@ -13,7 +13,8 @@ import { runStage1, type Stage1Result } from './stage1.ts';
 import { runScriptSandbox } from './script-run.ts';
 import { verifyExports } from './exports-verify.ts';
 import { runReplay, type ReplayResult } from './replay.ts';
-import { isBrowserDependent, runRealEnv, type RealEnvResult } from './real-env.ts';
+import { extractScenarios, isBrowserDependent, usesMock, runRealEnv, type RealEnvResult } from './real-env.ts';
+import { connectedScenarios } from './connected-scenarios.ts';
 import type { ChildJob, MockRoute } from './child.ts';
 import { newId, redactText, sha256 } from '../util.ts';
 import type { Store } from '../store.ts';
@@ -77,6 +78,21 @@ export interface ManualCheck {
   note: string;
 }
 
+interface ConnectedVerification {
+  jobId: string;
+  definition: ReturnType<typeof connectedScenarios>;
+  sequences: Record<string, number>;
+  results: Record<string, {
+    input: unknown;
+    result: { status: string; checks: { passed: boolean }[]; reason?: string };
+    /** 서버가 기록 시점에 계산한 증거: 실행 코드가 분석이 만든 원본과 같은지, 어느 브라우저에서 실행됐는지 */
+    evidence?: { at: string; codeSha256: string; modified: boolean; userAgent: string };
+  }>;
+}
+
+/** 3단계 판정 확정 기록: 누가·언제·어떤 배포 후보에 대해 확정했는지 */
+export interface Signoff { by: string; at: string; candidateSha256?: string; candidateId?: string; userAgent: string; summary: string }
+
 export interface Run {
   id: string;
   createdAt: string;
@@ -98,6 +114,8 @@ export interface Run {
   replay?: ReplayResult;
   /** 브라우저 의존 테스트: 같은 SUT 호출을 실제 브라우저에서 프로젝트 dist·배포 후보로 실행해 비교한 결과 */
   realEnv?: RealEnvResult;
+  connected?: ConnectedVerification;
+  signoff?: Signoff;
   stages: StageState[];
   jobs: Job[];
   manual: ManualCheck[];
@@ -449,6 +467,7 @@ export class RunManager {
     const from = a.project?.packageDir ?? run.project.root;
     if (s3.status === 'preparing') { s3.status = 'running'; s3.startedAt = new Date().toISOString(); }
     s3.reason = '원본 테스트를 배포 후보로 재실행 중';
+    run.connected = undefined;
     this.touch(run);
     return this.enqueue(run, { stage: 3, kind: 'replay', label: `원본 테스트를 배포 후보로 재실행: ${run.testFile.path}` }, async (job, signal) => {
       const r = await runReplay({ projectRoot: run.project.root, testFile: path.join(run.project.root, run.testFile.path), runner: a.project?.runner, fromDir: from, candidate: cand, outDir: this.store.runDir(run.id), signal, timeoutMs: job.timeoutMs - 5000 });
@@ -458,8 +477,13 @@ export class RunManager {
       // 브라우저 API에 의존하는 테스트는 mock 재실행만으로 통과시키지 않고, 실제 브라우저에서 같은 호출을 실행해 검증한다.
       const testPath = path.join(run.project.root, run.testFile.path);
       run.realEnv = undefined;
-      if (isBrowserDependent(testPath)) {
-        job.logs.push('브라우저 API 의존 테스트 → 실제 브라우저에서 실환경 검증 실행');
+      if (usesMock(testPath)) {
+        const ex = extractScenarios(testPath, from);
+        run.connected = { jobId: job.id, definition: connectedScenarios(testPath, from, r.packageDir), sequences: {}, results: {} };
+        run.realEnv = { status: 'passed', manual: true, reason: '시나리오별 실제 협력자 연결·기대 결과 검증 대기', browsers: [], scenarios: [], skipped: [], live: { dir: fs.mkdtempSync(path.join(this.store.runDir(run.id), 'connected-console-')), scenarios: {}, console: { packageDir: r.packageDir, projectRoot: run.project.root, modules: ex.modules, symbols: ex.symbols } } };
+        job.logs.push('3단계 화면에서 실제 협력자를 연결하고 모든 시나리오의 기대 결과를 검증해야 합니다.');
+      } else if (isBrowserDependent(testPath)) {
+        job.logs.push('mock·브라우저 API에 의존하는 테스트 → mock 대신 실제 협력자로 실환경 검증 실행');
         run.realEnv = await runRealEnv({ testFile: testPath, fromDir: from, packageDir: r.packageDir, projectRoot: run.project.root, outDir: this.store.runDir(run.id), signal, timeoutMs: job.timeoutMs - 5000, env: this.env, log: (m) => { job.logs.push(m); this.touch(run); } });
         job.logs.push(`실환경 검증: ${run.realEnv.status} — ${run.realEnv.reason}`);
       }
@@ -635,8 +659,34 @@ export class RunManager {
     });
   }
 
+  recordConnected(runId: string, data: any, ctx: { userAgent?: string } = {}) {
+    const run = this.runs.get(runId);
+    const configured = run?.connected;
+    if (!run || !configured || run.cancelled || run.stages[2].status !== 'running' || data.jobId !== configured.jobId) throw new HttpError(409, '유효한 3단계 시나리오 실행이 아닙니다.');
+    if (sha256(fs.readFileSync(path.join(run.project.root, run.testFile.path))) !== configured.definition.sourceHash) throw new HttpError(409, '테스트 파일이 변경되었습니다. 배포 후보를 다시 실행하세요.');
+    const definition = configured.definition.scenarios.find((s) => s.id === data.scenarioId);
+    if (!definition || !Number.isSafeInteger(data.sequence)) throw new HttpError(400, '시나리오 또는 실행 순서가 잘못되었습니다.');
+    if (data.sequence <= (configured.sequences[data.scenarioId] ?? 0)) return run;
+    if (data.type === 'result') {
+      const r = data.result;
+      if (!r || !['passed', 'failed'].includes(r.status) || !Array.isArray(r.checks) || r.checks.some((c: any) => typeof c?.passed !== 'boolean') || typeof data.input?.code !== 'string') throw new HttpError(400, '실행 결과 형식이 잘못되었습니다.');
+      if (r.status === 'passed' && (!r.checks.length || r.checks.some((c: any) => !c.passed))) throw new HttpError(400, '기대 결과 검증 통과 근거가 없습니다.');
+      // 통과 근거는 서버가 가진 원본 기대 검증 코드로 실행한 결과여야 한다. 화면에서 고친 코드의 결과는 기록하되 게이트 근거로 인정하지 않는다.
+      const modified = data.input.code !== definition.code;
+      configured.results[data.scenarioId] = {
+        input: data.input, result: r,
+        evidence: { at: new Date().toISOString(), codeSha256: sha256(data.input.code), modified, userAgent: String(ctx.userAgent ?? '알 수 없음').slice(0, 300) },
+      };
+    } else if (data.type === 'invalidate') delete configured.results[data.scenarioId];
+    else throw new HttpError(400, '시나리오 실행 작업이 잘못되었습니다.');
+    configured.sequences[data.scenarioId] = data.sequence;
+    // Keep the executing iframe mounted while its result is persisted.
+    this.store.saveRun(run);
+    return run;
+  }
+
   /** 3단계 판정 확정: Stage 모드 조작의 시나리오별 최신 결과로만 판단한다. Mock 조작은 별도로 보고한다. */
-  completeStage3(runId: string) {
+  completeStage3(runId: string, signer?: { by: string; userAgent?: string }) {
     const run = this.runs.get(runId);
     if (!run) throw new HttpError(404, '실행 없음');
     const s3 = run.stages[2];
@@ -644,11 +694,25 @@ export class RunManager {
     if (this.queue.some((p) => p.job.runId === runId) || run.jobs.some((j) => this.running.has(j.id))) throw new HttpError(409, '진행 중인 작업이 있음');
     if (run.replayMode) {
       const rp = run.replay;
-      s3.endedAt = new Date().toISOString();
       const jr = [...run.jobs].reverse().find((j) => j.kind === 'replay');
+      if (run.connected && jr?.status === 'passed') {
+        const configured = run.connected;
+        if (sha256(fs.readFileSync(path.join(run.project.root, run.testFile.path))) !== configured.definition.sourceHash) throw new HttpError(409, '테스트 파일이 변경되었습니다. 배포 후보를 다시 실행하세요.');
+        if (jr?.id !== configured.jobId || !configured.definition.scenarios.length) throw new HttpError(409, '실제 협력자 시나리오 구성이 없습니다. 배포 후보를 다시 실행하세요.');
+        const missing = configured.definition.scenarios.filter((s) => configured.results[s.id]?.result.status !== 'passed');
+        if (missing.length) throw new HttpError(409, `실제 협력자 기대 결과 미검증 ${missing.length}개: ${missing.map((s) => s.name).join(', ')}`);
+        // 원본 기대 검증 코드를 고쳐서 얻은 통과는 게이트 근거가 아니다.
+        const edited = configured.definition.scenarios.filter((s) => configured.results[s.id]?.evidence?.modified !== false);
+        if (edited.length) throw new HttpError(409, `원본 기대 검증 코드를 수정했거나 서버가 원본과 대조하지 못한 결과 ${edited.length}개: ${edited.map((s) => s.name).join(', ')} — 개발자 설정의 코드를 원래대로 두고 다시 검증하세요`);
+      } else if (jr?.status === 'passed' && usesMock(path.join(run.project.root, run.testFile.path))) throw new HttpError(409, '실제 협력자 구성 화면을 준비하려면 배포 후보를 다시 실행하세요.');
+      s3.endedAt = new Date().toISOString();
+      const nothingVerified = !!run.realEnv && !run.connected && run.realEnv.scenarios.length === 0;
       if (!rp || !jr) { s3.status = 'failed'; s3.reason = '배포 후보 재실행 0건 — 배포본 사용을 증명하지 않음'; }
+      else if (nothingVerified && jr.status === 'passed') { s3.status = 'failed'; s3.reason = `실제 환경에서 자동 검증된 시나리오 0건(자동 재현 불가 ${run.realEnv!.skipped.length}건) — 사람이 직접 호출한 결과는 게이트 근거로 쓰지 않으므로 통과시키지 않음`; }
       else if (jr.status !== 'passed') { s3.status = 'failed'; s3.reason = `배포 후보 재실행 미통과: ${jr.reason}`; }
-      else { s3.status = 'passed'; s3.reason = `원본 테스트 ${rp.run.tests.length}개가 배포 후보 모듈 ${rp.redirected.length}개로 재실행되어 통과${run.realEnv ? `, 실제 브라우저(${run.realEnv.browsers.filter((b) => b.ok).map((b) => b.name).join(', ')}) 시나리오 ${run.realEnv.scenarios.length}개 일치` : ''}`; }
+      else { s3.status = 'passed'; s3.reason = `원본 테스트 ${rp.run.tests.length}개가 배포 후보 모듈 ${rp.redirected.length}개로 재실행되어 통과${run.realEnv ? (run.realEnv.scenarios.length ? `, 실제 환경(${run.realEnv.browsers.filter((b) => b.ok).map((b) => b.name).join(', ') || 'Node'}) 시나리오 ${run.realEnv.scenarios.length}개 일치` : '') + (run.realEnv.manual ? `, 자동 재현 못 한 ${run.realEnv.skipped.length}건은 사용자가 실제 함수를 직접 호출해 확인` : '') : ''}`; }
+      if (s3.status === 'passed' && run.connected) s3.reason = `배포 후보 mock 재실행 통과 · 실제 협력자 시나리오 ${run.connected.definition.scenarios.length}개 기대 결과 검증 통과`;
+      this.recordSignoff(run, signer);
       this.touch(run);
       return run;
     }
@@ -660,6 +724,7 @@ export class RunManager {
       else if (ec.counts.fail) { const bad = ec.items.filter((i) => i.verdict === 'fail').map((i) => i.key); s3.status = 'failed'; s3.reason = `exports ${ec.counts.fail}개 import 실패: ${bad.slice(0, 5).join(', ')}${bad.length > 5 ? ' 외' : ''}`; }
       else if (left) { s3.status = 'failed'; s3.reason = `하위 패키지 이름이 치환되지 않고 남은 파일 ${left}개`; }
       else { s3.status = 'passed'; s3.reason = `exports ${ec.total}개 번들러 해석·평가 통과${ec.counts['needs-review'] ? `, 확인 필요 ${ec.counts['needs-review']}개(사람이 확인)` : ''}`; }
+      this.recordSignoff(run, signer);
       this.touch(run);
       return run;
     }
@@ -673,8 +738,20 @@ export class RunManager {
     if (done.length === 0) { s3.status = 'failed'; s3.reason = 'Stage 모드 조작 0건 — 실제 연계를 검증하지 않음'; }
     else if (bad.length) { s3.status = 'failed'; s3.reason = `Stage 연계 미통과: ${bad.map((x) => `${x.sc.title}(${x.job!.outcome?.linkVerdict ?? x.job!.status})`).join(', ')}`; }
     else { s3.status = 'passed'; s3.reason = `Stage 연계 통과 ${done.length}개 시나리오${notDone.length ? `, 미실행 ${notDone.length}개(${notDone.map((x) => x.sc.title).join(', ')})` : ''}`; }
+    this.recordSignoff(run, signer);
     this.touch(run);
     return run;
+  }
+
+  /** 판정 확정 기록: 누가·언제·어떤 배포 후보(해시)에 대해 확정했는지 남긴다. 보고서에 그대로 실린다. */
+  private recordSignoff(run: Run, signer?: { by: string; userAgent?: string }) {
+    const s3 = run.stages[2];
+    run.signoff = {
+      by: (signer?.by ?? '').trim().slice(0, 80) || '(기록 없음)', at: new Date().toISOString(),
+      candidateSha256: run.candidate?.tarballSha256, candidateId: run.candidate?.id,
+      userAgent: String(signer?.userAgent ?? '알 수 없음').slice(0, 300),
+      summary: `3단계 ${s3.status}: ${s3.reason}`.slice(0, 600),
+    };
   }
 
   addManual(runId: string, m: { target: string; verdict: ManualCheck['verdict']; note: string }) {
